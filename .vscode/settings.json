@@ -1,0 +1,30 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.adapterTargetName": "esp32s3",
+  "idf.openOcdConfigs": [
+    "board/esp32s3-bridge.cfg"
+  ],
+  "idf.portWin": "COM7",
+  "idf.flashType": "UART",
+  "tabnine.codeLensEnabled": false,
+  "editor.defaultFoldingRangeProvider": "espressif.esp-idf-extension",
+  "files.associations": {
+    "spi_master.h": "c",
+    "gpio.h": "c",
+    "tusb.h": "c",
+    "hid_device.h": "c",
+    "hc165.h": "c",
+    "stdio.h": "c",
+    "freertos.h": "c",
+    "tinyusb.h": "c",
+    "tinyusb_types.h": "c",
+    "hid.h": "c",
+    "esp_log.h": "c",
+    "led.h": "c",
+    "cstdint": "cpp",
+    "key_bind.h": "c",
+    "task.h": "c",
+    "string.h": "c",
+    "math.h": "c"
+  }
+}

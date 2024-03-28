@@ -1,0 +1,519 @@
+menu "Keyboard Configuration"
+
+    menu "General key number define"
+        config KEY_Q_NUM
+            int "Key number of the Q button."
+            default 63
+            range 1 79
+
+        config KEY_W_NUM
+            int "Key number of the W button."
+            default 62
+            range 1 79
+
+        config KEY_E_NUM
+            int "Key number of the E button."
+            default 61
+            range 1 79
+
+        config KEY_R_NUM
+            int "Key number of the R button."
+            default 70
+            range 1 79
+
+        config KEY_T_NUM
+            int "Key number of the T button."
+            default 69
+            range 1 79
+
+        config KEY_Y_NUM
+            int "Key number of the Y button."
+            default 68
+            range 1 79
+
+        config KEY_U_NUM
+            int "Key number of the U button."
+            default 67
+            range 1 79
+
+        config KEY_I_NUM
+            int "Key number of the I button."
+            default 74
+            range 1 79
+
+        config KEY_O_NUM
+            int "Key number of the O button."
+            default 73
+            range 1 79
+
+        config KEY_P_NUM
+            int "Key number of the P button."
+            default 79
+            range 1 79
+
+        config KEY_A_NUM
+            int "Key number of the A button."
+            default 58
+            range 1 79
+
+        config KEY_S_NUM
+            int "Key number of the S button."
+            default 60
+            range 1 79
+
+        config KEY_D_NUM
+            int "Key number of the D button."
+            default 59
+            range 1 79
+
+        config KEY_F_NUM
+            int "Key number of the F button."
+            default 71
+            range 1 79
+
+        config KEY_G_NUM
+            int "Key number of the G button."
+            default 72
+            range 1 79
+
+        config KEY_H_NUM
+            int "Key number of the H button."
+            default 65
+            range 1 79
+
+        config KEY_J_NUM
+            int "Key number of the J button."
+            default 66
+            range 1 79
+
+        config KEY_K_NUM
+            int "Key number of the K button."
+            default 75
+            range 1 79
+
+        config KEY_L_NUM
+            int "Key number of the L button."
+            default 76
+            range 1 79
+
+        config KEY_Z_NUM
+            int "Key number of the Z button."
+            default 7
+            range 1 79
+
+        config KEY_X_NUM
+            int "Key number of the X button."
+            default 6
+            range 1 79
+
+        config KEY_C_NUM
+            int "Key number of the C button."
+            default 5
+            range 1 79
+
+        config KEY_V_NUM
+            int "Key number of the V button."
+            default 12
+            range 1 79
+
+        config KEY_B_NUM
+            int "Key number of the B button."
+            default 11
+            range 1 79
+
+        config KEY_N_NUM
+            int "Key number of the N button."
+            default 10
+            range 1 79
+
+        config KEY_M_NUM
+            int "Key number of the M button."
+            default 9
+            range 1 79
+
+        config KEY_SPACE_NUM
+            int "Key number of the SPACE button."
+            default 4
+            range 1 79
+
+        config KEY_ENTER_NUM
+            int "Key number of the ENTER button."
+            default 17
+            range 1 79
+
+        config KEY_ESCAPE_NUM
+            int "Key number of the ESCAPE button."
+            default 50
+            range 1 79
+
+        config KEY_CAPS_LOCK_NUM
+            int "Key number of the CAPS_LOCK button."
+            default 57
+            range 1 79
+
+        config KEY_TAB_NUM
+            int "Key number of the TAB button."
+            default 64
+            range 1 79
+
+        config KEY_SEMICOLON_NUM
+            int "Key number of the SEMICOLON(;) button."
+            default 77
+            range 1 79
+
+        config KEY_APOSTROPHE_NUM
+            int "Key number of the APOSTROPHE(') button."
+            default 20
+            range 1 79
+
+        config KEY_GRAVE_NUM
+            int "Key number of the GRAVE(~) button."
+            default 54
+            range 1 79
+
+        config KEY_COMMA_NUM
+            int "Key number of the COMMA(,) button."
+            default 16
+            range 1 79
+
+        config KEY_PERIOD_NUM
+            int "Key number of the PERIOD(.) button."
+            default 15
+            range 1 79
+
+        config KEY_SLASH_NUM
+            int "Key number of the SLASH(/) button."
+            default 19
+            range 1 79
+        
+        config KEY_BACKSLASH_NUM
+            int "Key number of the BACKSLASH(\) button."
+            default 30
+            range 1 79
+        
+        config KEY_BRACKET_LEFT_NUM
+            int "Key number of the BACKSLASH([) button."
+            default 78
+            range 1 79
+        
+        config KEY_BRACKET_RIGHT_NUM
+            int "Key number of the BACKSLASH(]) button."
+            default 29
+            range 1 79
+        
+        config KEY_F1_NUM
+            int "Key number of the F1 button."
+            default 51
+            range 1 79
+
+        config KEY_F2_NUM
+            int "Key number of the F2 button."
+            default 50
+            range 1 79
+
+        config KEY_F3_NUM
+            int "Key number of the F3 button."
+            default 49
+            range 1 79
+
+        config KEY_F4_NUM
+            int "Key number of the F4 button."
+            default 44
+            range 1 79
+
+        config KEY_F5_NUM
+            int "Key number of the F5 button."
+            default 43
+            range 1 79
+
+        config KEY_F6_NUM
+            int "Key number of the F6 button."
+            default 42
+            range 1 79
+
+        config KEY_F7_NUM
+            int "Key number of the F7 button."
+            default 41
+            range 1 79
+
+        config KEY_F8_NUM
+            int "Key number of the F8 button."
+            default 46
+            range 1 79
+
+        config KEY_F9_NUM
+            int "Key number of the F9 button."
+            default 35
+            range 1 79
+
+        config KEY_F10_NUM
+            int "Key number of the F10 button."
+            default 34
+            range 1 79
+
+        config KEY_F11_NUM
+            int "Key number of the F11 button."
+            default 33
+            range 1 79
+
+        config KEY_F12_NUM
+            int "Key number of the F12 button."
+            default 27
+            range 1 79
+        
+        config KEY_ARROW_LEFT_NUM
+            int "Key number of the ARROW LEFT."
+            default 21
+            range 1 79
+        
+        config KEY_ARROW_DOWN_NUM
+            int "Key number of the ARROW DOWN."
+            default 22
+            range 1 79
+        
+        config KEY_ARROW_RIGHT_NUM
+            int "Key number of the ARROW RIGHT."
+            default 23
+            range 1 79
+        
+        config KEY_ARROW_UP_NUM
+            int "Key number of the ARROW UP."
+            default 24
+            range 1 79
+        
+        config KEY_1_NUM
+            int "Key number of the 1 button."
+            default 53
+            range 1 79
+        
+        config KEY_2_NUM
+            int "Key number of the 2 button."
+            default 56
+            range 1 79
+        
+        config KEY_3_NUM
+            int "Key number of the 3 button."
+            default 55
+            range 1 79
+        
+        config KEY_4_NUM
+            int "Key number of the 4 button."
+            default 46
+            range 1 79
+        
+        config KEY_5_NUM
+            int "Key number of the 5 button."
+            default 45
+            range 1 79
+        
+        config KEY_6_NUM
+            int "Key number of the 6 button."
+            default 48
+            range 1 79
+        
+        config KEY_7_NUM
+            int "Key number of the 7 button."
+            default 47
+            range 1 79
+        
+        config KEY_8_NUM
+            int "Key number of the 8 button."
+            default 38
+            range 1 79
+        
+        config KEY_9_NUM
+            int "Key number of the 9 button."
+            default 37
+            range 1 79
+        
+        config KEY_0_NUM
+            int "Key number of the 0 button."
+            default 40
+            range 1 79
+        
+        config KEY_MINUS_NUM
+            int "Key number of the -_ button."
+            default 39
+            range 1 79
+            
+        config KEY_EQUAL_NUM
+            int "Key number of the += button."
+            default 28
+            range 1 79
+            
+        config KEY_BACKSPACE_NUM
+            int "Key number of the BACKSPACE."
+            default 31
+            range 1 79
+        
+        config KEY_DELETE_NUM
+            int "Key number of the DELETE."
+            default 32
+            range 1 79
+        
+        config KEY_INSERT_NUM
+            int "Key number of the INSERT."
+            default 25
+            range 1 79
+            
+    endmenu
+
+    menu "Modifier key number define"
+        config KEY_LEFT_CTRL_NUM
+            int "Key number of the left ctrl button."
+            default 3
+            range 1 79
+        config KEY_LEFT_SHIFT_NUM
+            int "Key number of the left shift button."
+            default 8
+            range 1 79
+        config KEY_LEFT_ALT_NUM
+            int "Key number of the left alt button."
+            default 1
+            range 1 79
+        config KEY_LEFT_GUI_NUM
+            int "Key number of the left gui button."
+            default 2
+            range 1 79
+        config KEY_RIGHT_CTRL_NUM
+            int "Key number of the right ctrl button."
+            default 13
+            range 1 79
+        config KEY_RIGHT_SHIFT_NUM
+            int "Key number of the right shift button."
+            default 18
+            range 1 79
+        config KEY_RIGHT_ALT_NUM
+            int "Key number of the right alt button."
+            default 14
+            range 1 79
+        config KEY_RIGHT_GUI_NUM
+            int "Key number of the right GUI button."
+            default 0
+            range 0 79
+    endmenu
+
+    menu "Fn key number"
+        config KEY_FN_NUM
+            int "Key number of the Fn button."
+            default 26
+            range 1 79
+    endmenu
+
+    menu "Function key number"
+        config KEY_HOME_NUM
+            int "Key number of the HOME button.(When pressed Fn)"
+            default 21
+            range 0 79
+
+        config KEY_PAGE_DOWN_NUM
+            int "Key number of the PAGE_DOWN button.(When pressed Fn)"
+            default 22
+            range 0 79
+
+        config KEY_END_NUM
+            int "Key number of the END button.(When pressed Fn)"
+            default 23
+            range 0 79
+
+        config KEY_PAGE_UP_NUM
+            int "Key number of the PAGE_up button.(When pressed Fn)"
+            default 24
+            range 0 79
+
+        config KEY_KEYPAD_1_NUM
+            int "Key number of the KEYPAD_1 button.(When pressed Fn)"
+            default 53
+            range 0 79
+
+        config KEY_KEYPAD_2_NUM
+            int "Key number of the KEYPAD_2 button.(When pressed Fn)"
+            default 56
+            range 0 79
+
+        config KEY_KEYPAD_3_NUM
+            int "Key number of the KEYPAD_3 button.(When pressed Fn)"
+            default 55
+            range 0 79
+
+        config KEY_KEYPAD_4_NUM
+            int "Key number of the KEYPAD_4 button.(When pressed Fn)"
+            default 46
+            range 0 79
+
+        config KEY_KEYPAD_5_NUM
+            int "Key number of the KEYPAD_5 button.(When pressed Fn)"
+            default 45
+            range 0 79
+
+        config KEY_KEYPAD_6_NUM
+            int "Key number of the KEYPAD_6 button.(When pressed Fn)"
+            default 48
+            range 0 79
+
+        config KEY_KEYPAD_7_NUM
+            int "Key number of the KEYPAD_7 button.(When pressed Fn)"
+            default 47
+            range 0 79
+
+        config KEY_KEYPAD_8_NUM
+            int "Key number of the KEYPAD_8 button.(When pressed Fn)"
+            default 38
+            range 0 79
+
+        config KEY_KEYPAD_9_NUM
+            int "Key number of the KEYPAD_9 button.(When pressed Fn)"
+            default 37
+            range 0 79
+
+        config KEY_KEYPAD_0_NUM
+            int "Key number of the KEYPAD_0 button.(When pressed Fn)"
+            default 40
+            range 0 79
+
+        config KEY_VOLUME_UP_NUM
+            int "Key number of the VOLUME_UP button.(When pressed Fn)"
+            default 32
+            range 0 79
+
+        config KEY_VOLUME_DOWN_NUM
+            int "Key number of the VOLUME_DOWN button.(When pressed Fn)"
+            default 31
+            range 0 79
+
+        config KEY_MUTE_NUM
+            int "Key number of the MUTE button.(When pressed Fn)"
+            default 25
+            range 0 79
+    endmenu
+endmenu
+menu "LED Configuration"
+    config KEY_LED_SWITCH_NUM
+        int "LED switch key number"
+        default 28
+
+    config LED_STRIP_BLINK_GPIO
+        int "LED Strip GPIO number"
+        default 15
+    
+    config LED_STRIP_LED_NUMBERS
+        int "LED number on the bus"
+        default 79
+    
+    config LED_STRIP_RMT_RES_HZ
+        int "LED STRIP RMT RES MHZ"
+        default 10
+    
+    config LED_RAINBOW_HUE_INCREMENT
+        int "Adjust this value to control the speed of the rainbow effect"
+        default 1
+    
+    config LED_BREATHING_SPEED
+        int "Adjust this value to control the speed of the breathing effect"
+        default 75
+
+        config LED_SWITCH_SLEEP
+            int "How much time you want to delay after switch led state in ms"
+            default 1000
+
+endmenu
