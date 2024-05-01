@@ -1,5 +1,9 @@
 #include "led.h"
+
 bool led_state = false;
+int led_effects = 0;
+int led_brightness = 50;
+int num_effects = 7;
 
 led_strip_handle_t configure_led(void)
 {
@@ -29,50 +33,74 @@ led_strip_handle_t configure_led(void)
     return led_strip;
 }
 
-void breathled(void)
+void update_led_strip(led_strip_handle_t led_strip, int effect)
 {
-    led_strip_handle_t led_strip = configure_led();
-    float hue = 0.0f;
-    float delta_hue = LED_RAINBOW_HUE_INCREMENT;
-    float brightness = 0.0f;
-    float delta_brightness = 0.05f; // Adjust this value to control the speed of the breathing effect
-    while (1){
-        if (led_state) {
-            // Calculate current hue
-            float current_hue = hue;
-
-            // Calculate RGB values based on current hue and brightness
-            uint8_t r, g, b;
-            hsv_to_rgb(current_hue, 1.0f, brightness, &r, &g, &b);
-
-            // Set RGB values for all LEDs
-            for (int i = 0; i < LED_STRIP_LED_NUMBERS; i++) {
-            ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, i, r, g, b));
+    switch (effect) {
+        case 0: // Red constant
+            {
+                // Set all LEDs to red with adjusted brightness
+                for (int i = 0; i < LED_STRIP_LED_NUMBERS; i++) {
+                    ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, i, led_brightness * 255 / 100, 0, 0));
+                }
+                ESP_ERROR_CHECK(led_strip_refresh(led_strip));
             }
-
-            ESP_ERROR_CHECK(led_strip_refresh(led_strip));
-
-            // Update brightness
-            brightness += delta_brightness;
-            if (brightness >= 1.0f || brightness <= 0.0f) {
-                delta_brightness = -delta_brightness;
+            break;
+        case 1: // Cyan constant
+            {
+                // Set all LEDs to cyan with adjusted brightness
+                for (int i = 0; i < LED_STRIP_LED_NUMBERS; i++) {
+                    ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, i, 0, led_brightness * 255 / 100, led_brightness * 255 / 100));
+                }
+                ESP_ERROR_CHECK(led_strip_refresh(led_strip));
             }
-
-            // Update hue
-            hue += delta_hue;
-            if (hue >= 1.0f) {
-                hue -= 1.0f;
+            break;
+        case 2: // Blue constant
+            {
+                // Set all LEDs to blue with adjusted brightness
+                for (int i = 0; i < LED_STRIP_LED_NUMBERS; i++) {
+                    ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, i, 0, 0, led_brightness * 255 / 100));
+                }
+                ESP_ERROR_CHECK(led_strip_refresh(led_strip));
             }
+            break;
+        case 3: // Green constant
+            {
+                // Set all LEDs to green with adjusted brightness
+                for (int i = 0; i < LED_STRIP_LED_NUMBERS; i++) {
+                    ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, i, 0, led_brightness * 255 / 100, 0));
+                }
+                ESP_ERROR_CHECK(led_strip_refresh(led_strip));
+            }
+            break;
+        case 4: // Yellow constant
+            {
+                // Set all LEDs to yellow with adjusted brightness
+                for (int i = 0; i < LED_STRIP_LED_NUMBERS; i++) {
+                    ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, i, led_brightness * 255 / 100, led_brightness * 255 / 100, 0));
+                }
+                ESP_ERROR_CHECK(led_strip_refresh(led_strip));
+            }
+            break;
 
-            vTaskDelay(pdMS_TO_TICKS(LED_BREATHING_SPEED));
-        } else {
-            // Turn off all LEDs
-            ESP_ERROR_CHECK(led_strip_clear(led_strip));
-            vTaskDelay(pdMS_TO_TICKS(100)); // Wait for 100ms
-        }
+        default:
+            break;
     }
 }
 
+
+void led_task(void *pvParameters)
+{
+    led_strip_handle_t led_strip = configure_led();
+
+    while (1) {
+        if (led_state) {
+            update_led_strip(led_strip, led_effects);
+        } else {
+            ESP_ERROR_CHECK(led_strip_clear(led_strip));
+        }
+        vTaskDelay(pdMS_TO_TICKS(100)); // Wait for 100ms
+    }
+}
 
 // Function to convert HSV to RGB
 void hsv_to_rgb(float h, float s, float v, uint8_t *r, uint8_t *g, uint8_t *b) {

@@ -5,6 +5,7 @@
 #include "class/hid/hid_device.h"
 #include "led.h"
 
+
 #define NUM_MODIFIER_KEYS (sizeof(modifier_key_mappings) / sizeof(modifier_mapping_t))
 #define MAX_PRESSED_KEYS 6
 

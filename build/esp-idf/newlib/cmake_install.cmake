@@ -39,6 +39,6 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("D:/Code/2024-3/tusb_hid/build/esp-idf/newlib/port/cmake_install.cmake")
+  include("D:/Code/2024-3/Yobboy-keyboard/build/esp-idf/newlib/port/cmake_install.cmake")
 endif()
 

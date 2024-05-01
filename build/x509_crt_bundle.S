@@ -1,4 +1,4 @@
-/* * Data converted from D:/Code/2024-3/tusb_hid/build/esp-idf/mbedtls/x509_crt_bundle
+/* * Data converted from D:/Code/2024-3/Yobboy-keyboard/build/esp-idf/mbedtls/x509_crt_bundle
  */
 .data
 .section .rodata.embedded

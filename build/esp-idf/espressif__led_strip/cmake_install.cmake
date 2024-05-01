@@ -1,4 +1,4 @@
-# Install script for directory: D:/Code/2024-3/tusb_hid/managed_components/espressif__led_strip
+# Install script for directory: D:/Code/2024-3/Yobboy-keyboard/managed_components/espressif__led_strip
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

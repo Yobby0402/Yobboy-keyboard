@@ -98,14 +98,14 @@ void button_task(void *pvParameters)
         process_key_press(pressed_pins, num_pressed_pins);
 
         // 模拟延时，这里可以使用实际系统的延时函数
-        vTaskDelay(pdMS_TO_TICKS(10)); // 10 毫秒延时示例
+        vTaskDelay(pdMS_TO_TICKS(10)); //  毫秒延时示例
     }
 }
 
 
 void app_main(void)
 {
-    // breathled();
+
     // Initialize button that will trigger HID reports
     const gpio_config_t boot_button_config = {
         .pin_bit_mask = BIT64(APP_BUTTON),
@@ -132,7 +132,7 @@ void app_main(void)
     key_init();
     xTaskCreate(button_task, "button_task", 2048, NULL, configMAX_PRIORITIES - 1, NULL);
     
-    xTaskCreatePinnedToCore(breathled, "breathled_task", 4096, NULL, configMAX_PRIORITIES - 2, NULL, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(led_task, "led_task", 4096, NULL, configMAX_PRIORITIES - 2, NULL, tskNO_AFFINITY);
     vTaskDelete(NULL);
 
 }

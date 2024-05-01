@@ -1,0 +1,24 @@
+-- ccache will be used for faster recompilation
+-- Building ESP-IDF components for target esp32s3
+Processing 4 dependencies:
+[1/4] espressif/esp_tinyusb (1.4.4)
+[2/4] espressif/led_strip (2.5.3)
+[3/4] espressif/tinyusb (0.15.0~5)
+[4/4] idf (5.2.0)
+-- Project sdkconfig file D:/Code/2024-3/Yobboy-keyboard/sdkconfig
+Loading defaults file D:/Code/2024-3/Yobboy-keyboard/sdkconfig.defaults...
+-- Compiler supported targets: xtensa-esp-elf
+-- App "tusb_hid" version: 0033dc5-dirty
+-- Adding linker script D:/Code/2024-3/Yobboy-keyboard/build/esp-idf/esp_system/ld/memory.ld
+-- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_system/ld/esp32s3/sections.ld.in
+-- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ld
+-- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.api.ld
+-- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.libgcc.ld
+-- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.newlib.ld
+-- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.version.ld
+-- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/soc/esp32s3/ld/esp32s3.peripherals.ld
+-- Components: app_update bootloader bootloader_support cxx driver efuse esp_app_format esp_bootloader_format esp_common esp_event esp_hw_support esp_mm esp_netif esp_netif_stack esp_partition esp_pm esp_ringbuf esp_rom esp_system esp_timer espressif__esp_tinyusb espressif__led_strip espressif__tinyusb esptool_py fatfs freertos hal heap log lwip main mbedtls newlib partition_table pthread sdmmc soc spi_flash usb vfs wear_levelling xtensa
+-- Component paths: C:/Users/Yobboy/esp/v5.2/esp-idf/components/app_update C:/Users/Yobboy/esp/v5.2/esp-idf/components/bootloader C:/Users/Yobboy/esp/v5.2/esp-idf/components/bootloader_support C:/Users/Yobboy/esp/v5.2/esp-idf/components/cxx C:/Users/Yobboy/esp/v5.2/esp-idf/components/driver C:/Users/Yobboy/esp/v5.2/esp-idf/components/efuse C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_app_format C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_bootloader_format C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_common C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_event C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_hw_support C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_mm C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_netif C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_netif_stack C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_partition C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_pm C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_ringbuf C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_rom C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_system C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_timer D:/Code/2024-3/Yobboy-keyboard/managed_components/espressif__esp_tinyusb D:/Code/2024-3/Yobboy-keyboard/managed_components/espressif__led_strip D:/Code/2024-3/Yobboy-keyboard/managed_components/espressif__tinyusb C:/Users/Yobboy/esp/v5.2/esp-idf/components/esptool_py C:/Users/Yobboy/esp/v5.2/esp-idf/components/fatfs C:/Users/Yobboy/esp/v5.2/esp-idf/components/freertos C:/Users/Yobboy/esp/v5.2/esp-idf/components/hal C:/Users/Yobboy/esp/v5.2/esp-idf/components/heap C:/Users/Yobboy/esp/v5.2/esp-idf/components/log C:/Users/Yobboy/esp/v5.2/esp-idf/components/lwip D:/Code/2024-3/Yobboy-keyboard/main C:/Users/Yobboy/esp/v5.2/esp-idf/components/mbedtls C:/Users/Yobboy/esp/v5.2/esp-idf/components/newlib C:/Users/Yobboy/esp/v5.2/esp-idf/components/partition_table C:/Users/Yobboy/esp/v5.2/esp-idf/components/pthread C:/Users/Yobboy/esp/v5.2/esp-idf/components/sdmmc C:/Users/Yobboy/esp/v5.2/esp-idf/components/soc C:/Users/Yobboy/esp/v5.2/esp-idf/components/spi_flash C:/Users/Yobboy/esp/v5.2/esp-idf/components/usb C:/Users/Yobboy/esp/v5.2/esp-idf/components/vfs C:/Users/Yobboy/esp/v5.2/esp-idf/components/wear_levelling C:/Users/Yobboy/esp/v5.2/esp-idf/components/xtensa
+-- Configuring done
+-- Generating done
+-- Build files have been written to: D:/Code/2024-3/Yobboy-keyboard/build

@@ -17135,45 +17135,6 @@
                                 ],
                                 "title": "Key number of the KEYPAD_0 button.(When pressed Fn)",
                                 "type": "int"
-                            },
-                            {
-                                "children": [],
-                                "depends_on": null,
-                                "help": null,
-                                "id": "KEY_VOLUME_UP_NUM",
-                                "name": "KEY_VOLUME_UP_NUM",
-                                "range": [
-                                    0,
-                                    79
-                                ],
-                                "title": "Key number of the VOLUME_UP button.(When pressed Fn)",
-                                "type": "int"
-                            },
-                            {
-                                "children": [],
-                                "depends_on": null,
-                                "help": null,
-                                "id": "KEY_VOLUME_DOWN_NUM",
-                                "name": "KEY_VOLUME_DOWN_NUM",
-                                "range": [
-                                    0,
-                                    79
-                                ],
-                                "title": "Key number of the VOLUME_DOWN button.(When pressed Fn)",
-                                "type": "int"
-                            },
-                            {
-                                "children": [],
-                                "depends_on": null,
-                                "help": null,
-                                "id": "KEY_MUTE_NUM",
-                                "name": "KEY_MUTE_NUM",
-                                "range": [
-                                    0,
-                                    79
-                                ],
-                                "title": "Key number of the MUTE button.(When pressed Fn)",
-                                "type": "int"
                             }
                         ],
                         "depends_on": null,
@@ -17197,6 +17158,45 @@
                         "name": "KEY_LED_SWITCH_NUM",
                         "range": null,
                         "title": "LED switch key number",
+                        "type": "int"
+                    },
+                    {
+                        "children": [],
+                        "depends_on": null,
+                        "help": null,
+                        "id": "KEY_LED_ADD_NUM",
+                        "name": "KEY_LED_ADD_NUM",
+                        "range": [
+                            0,
+                            79
+                        ],
+                        "title": "Key number of the led brightness add button.(When pressed Fn)",
+                        "type": "int"
+                    },
+                    {
+                        "children": [],
+                        "depends_on": null,
+                        "help": null,
+                        "id": "KEY_LED_SUB_NUM",
+                        "name": "KEY_LED_SUB_NUM",
+                        "range": [
+                            0,
+                            79
+                        ],
+                        "title": "Key number of the led brightness sub button.(When pressed Fn)",
+                        "type": "int"
+                    },
+                    {
+                        "children": [],
+                        "depends_on": null,
+                        "help": null,
+                        "id": "KEY_LED_EFFECT_NUM",
+                        "name": "KEY_LED_EFFECT_NUM",
+                        "range": [
+                            0,
+                            79
+                        ],
+                        "title": "Key number of the led effect switch button.(When pressed Fn)",
                         "type": "int"
                     },
                     {

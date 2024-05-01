@@ -470,27 +470,27 @@ menu "Keyboard Configuration"
             int "Key number of the KEYPAD_0 button.(When pressed Fn)"
             default 40
             range 0 79
-
-        config KEY_VOLUME_UP_NUM
-            int "Key number of the VOLUME_UP button.(When pressed Fn)"
-            default 32
-            range 0 79
-
-        config KEY_VOLUME_DOWN_NUM
-            int "Key number of the VOLUME_DOWN button.(When pressed Fn)"
-            default 31
-            range 0 79
-
-        config KEY_MUTE_NUM
-            int "Key number of the MUTE button.(When pressed Fn)"
-            default 25
-            range 0 79
     endmenu
 endmenu
 menu "LED Configuration"
     config KEY_LED_SWITCH_NUM
         int "LED switch key number"
         default 28
+
+    config KEY_LED_ADD_NUM
+        int "Key number of the led brightness add button.(When pressed Fn)"
+        default 32
+        range 0 79
+
+    config KEY_LED_SUB_NUM
+        int "Key number of the led brightness sub button.(When pressed Fn)"
+        default 31
+        range 0 79
+
+    config KEY_LED_EFFECT_NUM
+        int "Key number of the led effect switch button.(When pressed Fn)"
+        default 25
+        range 0 79
 
     config LED_STRIP_BLINK_GPIO
         int "LED Strip GPIO number"

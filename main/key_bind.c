@@ -92,9 +92,7 @@ const double_layer_key_t double_layer_keys[] = {
     {CONFIG_KEY_KEYPAD_8_NUM, HID_KEY_KEYPAD_8},
     {CONFIG_KEY_KEYPAD_9_NUM, HID_KEY_KEYPAD_9},
     {CONFIG_KEY_KEYPAD_0_NUM, HID_KEY_KEYPAD_0},
-    {CONFIG_KEY_VOLUME_DOWN_NUM, HID_KEY_VOLUME_DOWN},
-    {CONFIG_KEY_VOLUME_UP_NUM, HID_KEY_VOLUME_UP},
-    {CONFIG_KEY_MUTE_NUM, HID_KEY_MUTE},
+
 };
 
 /**
@@ -145,7 +143,27 @@ void process_key_press(int* pressed_pins, int num_pressed_pins) {
             led_state = !led_state;
             vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
         }
-
+        else if (pressed_pins[0]==CONFIG_KEY_LED_ADD_NUM || pressed_pins[1]==CONFIG_KEY_LED_ADD_NUM){
+            led_brightness += 10;
+            if (led_brightness > 100) 
+            {
+                led_brightness = 100;
+            }
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
+        }
+        else if (pressed_pins[0]==CONFIG_KEY_LED_SUB_NUM || pressed_pins[1]==CONFIG_KEY_LED_SUB_NUM){
+            led_brightness -= 10;
+            if (led_brightness < 0) 
+            {
+                led_brightness = 0;
+            }
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
+        }
+        else if (pressed_pins[0]==CONFIG_KEY_LED_EFFECT_NUM || pressed_pins[1]==CONFIG_KEY_LED_EFFECT_NUM){
+            led_effects = (led_effects + 1) % num_effects;
+            vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
+        }
+        
     }
 
     // 遍历按下的按键，查找多层功能键
