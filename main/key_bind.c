@@ -92,7 +92,9 @@ const double_layer_key_t double_layer_keys[] = {
     {CONFIG_KEY_KEYPAD_8_NUM, HID_KEY_KEYPAD_8},
     {CONFIG_KEY_KEYPAD_9_NUM, HID_KEY_KEYPAD_9},
     {CONFIG_KEY_KEYPAD_0_NUM, HID_KEY_KEYPAD_0},
-
+    {CONFIG_KEY_KEYPAD_SUBTRACT_NUM, HID_KEY_KEYPAD_SUBTRACT},
+    {CONFIG_KEY_KEYPAD_ADD_NUM, HID_KEY_KEYPAD_ADD},
+    {CONFIG_KEY_KEYPAD_DIVIDE_NUM, HID_KEY_KEYPAD_DIVIDE},
 };
 
 /**
@@ -160,7 +162,8 @@ void process_key_press(int* pressed_pins, int num_pressed_pins) {
             vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
         }
         else if (pressed_pins[0]==CONFIG_KEY_LED_EFFECT_NUM || pressed_pins[1]==CONFIG_KEY_LED_EFFECT_NUM){
-            led_effects = (led_effects + 1) % num_effects;
+            led_effects = led_effects + 1; 
+            if(led_effects>num_effects)led_effects=0;
             vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
         }
         

@@ -91,6 +91,8 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
 // button process function
 void button_task(void *pvParameters)
 {
+    
+
     while (1) {
         // 检测按键状态并处理按键事件
         int pressed_pins[NUM_PRESSED_PINS_MAX];
@@ -105,7 +107,6 @@ void button_task(void *pvParameters)
 
 void app_main(void)
 {
-
     // Initialize button that will trigger HID reports
     const gpio_config_t boot_button_config = {
         .pin_bit_mask = BIT64(APP_BUTTON),
@@ -127,8 +128,6 @@ void app_main(void)
 
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
     ESP_LOGI(TAG, "USB initialization DONE");
-
-
     key_init();
     xTaskCreate(button_task, "button_task", 2048, NULL, configMAX_PRIORITIES - 1, NULL);
     

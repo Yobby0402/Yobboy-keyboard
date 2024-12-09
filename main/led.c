@@ -3,7 +3,7 @@
 bool led_state = false;
 int led_effects = 0;
 int led_brightness = 50;
-int num_effects = 7;
+int num_effects = 6;
 
 led_strip_handle_t configure_led(void)
 {
@@ -81,7 +81,15 @@ void update_led_strip(led_strip_handle_t led_strip, int effect)
                 ESP_ERROR_CHECK(led_strip_refresh(led_strip));
             }
             break;
-
+        case 5: // Yellow constant
+            {
+                // Set all LEDs to yellow with adjusted brightness
+                for (int i = 0; i < LED_STRIP_LED_NUMBERS; i++) {
+                    ESP_ERROR_CHECK(led_strip_set_pixel(led_strip, i, led_brightness * 255 / 100, led_brightness * 255 / 100, led_brightness * 255 / 100));
+                }
+                ESP_ERROR_CHECK(led_strip_refresh(led_strip));
+            }
+            break;
         default:
             break;
     }

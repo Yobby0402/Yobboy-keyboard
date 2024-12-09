@@ -8,7 +8,7 @@ Processing 4 dependencies:
 -- Project sdkconfig file D:/Code/2024-3/Yobboy-keyboard/sdkconfig
 Loading defaults file D:/Code/2024-3/Yobboy-keyboard/sdkconfig.defaults...
 -- Compiler supported targets: xtensa-esp-elf
--- App "tusb_hid" version: 0033dc5-dirty
+-- App "tusb_hid" version: 8853ab5-dirty
 -- Adding linker script D:/Code/2024-3/Yobboy-keyboard/build/esp-idf/esp_system/ld/memory.ld
 -- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_system/ld/esp32s3/sections.ld.in
 -- Adding linker script C:/Users/Yobboy/esp/v5.2/esp-idf/components/esp_rom/esp32s3/ld/esp32s3.rom.ld

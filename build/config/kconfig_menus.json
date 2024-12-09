@@ -17135,6 +17135,45 @@
                                 ],
                                 "title": "Key number of the KEYPAD_0 button.(When pressed Fn)",
                                 "type": "int"
+                            },
+                            {
+                                "children": [],
+                                "depends_on": null,
+                                "help": null,
+                                "id": "KEY_KEYPAD_SUBTRACT_NUM",
+                                "name": "KEY_KEYPAD_SUBTRACT_NUM",
+                                "range": [
+                                    0,
+                                    79
+                                ],
+                                "title": "Key number of the KEYPAD SUBTRACT button.(When pressed Fn)",
+                                "type": "int"
+                            },
+                            {
+                                "children": [],
+                                "depends_on": null,
+                                "help": null,
+                                "id": "KEY_KEYPAD_ADD_NUM",
+                                "name": "KEY_KEYPAD_ADD_NUM",
+                                "range": [
+                                    0,
+                                    79
+                                ],
+                                "title": "Key number of the KEYPAD ADD button.(When pressed Fn)",
+                                "type": "int"
+                            },
+                            {
+                                "children": [],
+                                "depends_on": null,
+                                "help": null,
+                                "id": "KEY_KEYPAD_DIVIDE_NUM",
+                                "name": "KEY_KEYPAD_DIVIDE_NUM",
+                                "range": [
+                                    0,
+                                    79
+                                ],
+                                "title": "Key number of the KEYPAD Divide button.(When pressed Fn)",
+                                "type": "int"
                             }
                         ],
                         "depends_on": null,

@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "tusb_hid",
-    "project_version":    "0033dc5-dirty",
+    "project_version":    "8853ab5-dirty",
     "project_path":       "D:/Code/2024-3/Yobboy-keyboard",
     "idf_path":           "C:/Users/Yobboy/esp/v5.2/esp-idf",
     "build_dir":          "D:/Code/2024-3/Yobboy-keyboard/build",
@@ -1620,18 +1620,6 @@
             "managed_priv_reqs": [],
             "include_dirs": [ "include", "interface" ]
         },
-        "espressif__esp_tinyusb": {
-            "alias": "idf::espressif__esp_tinyusb",
-            "target": "___idf_espressif__esp_tinyusb",
-            "prefix": "idf",
-            "dir": "D:/Code/2024-3/Yobboy-keyboard/managed_components/espressif__esp_tinyusb",
-            "lib": "__idf_espressif__esp_tinyusb",
-            "reqs": [ "fatfs", "vfs", "espressif__tinyusb" ],
-            "priv_reqs": [ "usb" ],
-            "managed_reqs": [ "espressif__tinyusb" ],
-            "managed_priv_reqs": [],
-            "include_dirs": [ "include" ]
-        },
         "espressif__tinyusb": {
             "alias": "idf::espressif__tinyusb",
             "target": "___idf_espressif__tinyusb",
@@ -1643,6 +1631,18 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "include_dirs": [ "src/", "C:/Users/Yobboy/esp/v5.2/esp-idf/components/freertos/FreeRTOS-Kernel/include/freertos/" ]
+        },
+        "espressif__esp_tinyusb": {
+            "alias": "idf::espressif__esp_tinyusb",
+            "target": "___idf_espressif__esp_tinyusb",
+            "prefix": "idf",
+            "dir": "D:/Code/2024-3/Yobboy-keyboard/managed_components/espressif__esp_tinyusb",
+            "lib": "__idf_espressif__esp_tinyusb",
+            "reqs": [ "fatfs", "vfs", "espressif__tinyusb" ],
+            "priv_reqs": [ "usb" ],
+            "managed_reqs": [ "espressif__tinyusb" ],
+            "managed_priv_reqs": [],
+            "include_dirs": [ "include" ]
         }
     },
     "debug_prefix_map_gdbinit": ""
