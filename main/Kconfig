@@ -483,11 +483,178 @@ menu "Keyboard Configuration"
             default 19
             range 0 79
     endmenu
+
+    menu "Consumer control key number"
+        config KEY_MUTE_BUTTON_NUM
+            int "Key number of the dedicated mute button."
+            default 0
+            range 0 79
+            help
+                Set to 0 if there is no dedicated mute key on the PCB.
+
+        config KEY_VOLUME_UP_BUTTON_NUM
+            int "Key number of the dedicated volume up button."
+            default 0
+            range 0 79
+            help
+                Set to 0 if there is no dedicated volume up key on the PCB.
+
+        config KEY_VOLUME_DOWN_BUTTON_NUM
+            int "Key number of the dedicated volume down button."
+            default 0
+            range 0 79
+            help
+                Set to 0 if there is no dedicated volume down key on the PCB.
+    endmenu
 endmenu
+
+menu "HC165 Key Scan Configuration"
+    choice HC165_READ_MODE
+        prompt "HC165 Read Mode"
+        default HC165_MODE_GPIO
+        help
+            Select the method to read HC165 shift register data.
+            - GPIO Mode: Simple GPIO bit-banging (slow but compatible)
+            - Optimized GPIO: Optimized GPIO without delays (3-4x faster)
+            - Hardware SPI: Use ESP32-S3 SPI peripheral (16-20x faster, needs SPI pins)
+
+        config HC165_MODE_GPIO
+            bool "GPIO Mode (Original)"
+            help
+                Original GPIO bit-banging method with delays.
+                Speed: ~320us for 80 keys
+                Pros: Simple, compatible with any GPIO pins
+                Cons: Slower, higher CPU usage
+
+        config HC165_MODE_GPIO_OPTIMIZED
+            bool "Optimized GPIO Mode"
+            help
+                Optimized GPIO mode with reduced delays and register operations.
+                Speed: ~80-100us for 80 keys (3-4x faster)
+                Pros: Fast, no hardware changes needed
+                Cons: Still uses CPU for bit-banging
+
+        config HC165_MODE_HARDWARE_SPI
+            bool "Hardware SPI Mode"
+            help
+                Use ESP32-S3 hardware SPI peripheral (SPI2 or SPI3).
+                Speed: ~15-20us for 80 keys (16-20x faster)
+                Pros: Fastest, very low CPU usage, precise timing
+                Cons: Requires SPI-compatible GPIO pins, occupies one SPI peripheral
+    endchoice
+
+    config HC165_PIN_DATA
+        int "HC165 DATA (QH) Pin"
+        default 16
+        range 0 48
+        help
+            GPIO pin connected to HC165 serial data output (QH pin).
+            For Hardware SPI mode, this should be a valid MISO pin.
+
+    config HC165_PIN_CLK
+        int "HC165 CLK (Clock) Pin"
+        default 17
+        range 0 48
+        help
+            GPIO pin connected to HC165 clock input (CLK pin).
+            For Hardware SPI mode, this should be a valid SCLK pin.
+
+    config HC165_PIN_SHLD
+        int "HC165 SH/LD (Shift/Load) Pin"
+        default 18
+        range 0 48
+        help
+            GPIO pin connected to HC165 parallel load control (SH/LD pin).
+            This pin is always controlled as regular GPIO.
+
+    config HC165_SPI_HOST
+        int "SPI Host (2 or 3)"
+        depends on HC165_MODE_HARDWARE_SPI
+        default 2
+        range 2 3
+        help
+            Select which SPI peripheral to use:
+            2 = SPI2_HOST
+            3 = SPI3_HOST
+            Note: SPI1 is reserved for flash
+
+    config HC165_SPI_FREQ_MHZ
+        int "SPI Clock Frequency (MHz)"
+        depends on HC165_MODE_HARDWARE_SPI
+        default 10
+        range 1 20
+        help
+            SPI clock frequency in MHz.
+            Higher frequency = faster read, but may be unstable.
+            Recommended: 10MHz for stable operation.
+
+    config HC165_NUM_KEYS
+        int "Number of keys (8 x number of HC165 chips)"
+        default 80
+        range 8 256
+        help
+            Total number of keys to scan.
+            Should be 8 x (number of HC165 chips in chain).
+            Example: 10 HC165 chips = 80 keys
+
+endmenu
+
+menu "Application Mode"
+    config LED_STRIP_TEST_APP
+        bool "Enable standalone LED strip test firmware"
+        help
+            Build a minimal firmware that skips USB/keyboard logic and simply
+            exercises the LED strip. Use this to validate hardware wiring.
+
+    config LED_TEST_NUM_LEDS
+        int "Number of LEDs on test strip"
+        default 78
+        range 1 512
+        help
+            Total number of LEDs physically connected in the test setup.
+
+    config LED_TEST_GPIO
+        int "LED test data GPIO"
+        default 15
+        range 0 48
+        help
+            GPIO pin that drives the LED strip data line during the test.
+
+    config LED_TEST_BRIGHTNESS
+        int "LED test brightness (0-255)"
+        default 64
+        range 1 255
+        help
+            Global brightness applied to all test colors (0-255). Lower values
+            reduce current draw.
+
+    config LED_TEST_PATTERN_DELAY_MS
+        int "LED test pattern dwell time (ms)"
+        default 1000
+        range 50 10000
+        help
+            How long each solid color stays active before switching.
+
+    config LED_TEST_USE_DMA
+        bool "Use DMA for LED test output"
+        default y
+        help
+            Enable DMA transfers for the LED test RMT driver (recommended).
+endmenu
+
 menu "LED Configuration"
     config KEY_LED_SWITCH_NUM
         int "LED switch key number"
         default 27
+
+    config LED_POWER_ON_FADE_STEPS
+        int "LED power-on fade steps"
+        default 30
+        range 1 255
+        help
+            Number of refresh cycles used to gradually brighten the LEDs
+            when turning them on. Higher values mean a longer fade-in that
+            can reduce inrush current.
 
     config KEY_LED_ADD_NUM
         int "Key number of the led brightness add button.(When pressed Fn)"
@@ -527,5 +694,62 @@ menu "LED Configuration"
         config LED_SWITCH_SLEEP
             int "How much time you want to delay after switch led state in ms"
             default 1000
+
+    menu "LED Performance Configuration"
+        config LED_STRIP_USE_DMA
+            bool "Enable DMA for LED Strip (Recommended)"
+            default y
+            help
+                Enable DMA for LED strip operations to reduce CPU usage.
+                This significantly improves performance (60% less CPU usage).
+                Recommended for all users unless you have specific DMA conflicts.
+        
+        config LED_STRIP_REFRESH_RATE
+            int "LED Strip refresh rate (Hz)"
+            default 100
+            range 50 200
+            help
+                LED strip refresh rate in Hz.
+                Higher values provide smoother animations but increase CPU usage.
+                - 50 Hz: Low power mode
+                - 100 Hz: Standard (recommended)
+                - 150 Hz: High performance
+                - 200 Hz: Maximum smoothness (requires DMA)
+    endmenu
+
+    menu "NVS Storage Configuration"
+        config NVS_STORAGE_ENABLE
+            bool "Enable NVS Storage for Settings"
+            default y
+            help
+                Save keyboard settings to NVS (Non-Volatile Storage).
+                Settings will be restored after power cycle.
+                This includes LED brightness, effects, and other configurations.
+        
+        config NVS_SAVE_LED_SETTINGS
+            bool "Save LED settings to NVS"
+            default y
+            depends on NVS_STORAGE_ENABLE
+            help
+                Save LED brightness, state, and effect to NVS.
+                Settings will be restored on next boot.
+        
+        config NVS_SAVE_VOLUME_SETTINGS
+            bool "Save volume control settings to NVS"
+            default y
+            depends on NVS_STORAGE_ENABLE
+            help
+                Save volume step configuration to NVS.
+        
+        config NVS_AUTO_SAVE_DELAY
+            int "Auto-save delay (seconds)"
+            default 5
+            range 1 60
+            depends on NVS_STORAGE_ENABLE
+            help
+                Delay before auto-saving settings after changes.
+                This prevents excessive writes to flash memory.
+                Lower values save faster but may reduce flash lifetime.
+    endmenu
 
 endmenu

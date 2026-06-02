@@ -1,8 +1,30 @@
 #include "key_bind.h"
 
-/**
- * @brief Bind basic keys' numbers and their codes,these keys have no further function.
- */
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "class/hid/hid_device.h"
+#include "usb_descriptors.h"
+#include "keyboard_profile.h"
+#include "esp_log.h"
+
+static const char *TAG = "key_bind";
+
+static TickType_t last_led_switch_time = 0;
+static TickType_t last_volume_time = 0;
+
+#define LED_CONTROL_COOLDOWN_MS CONFIG_LED_SWITCH_SLEEP
+#define VOLUME_CONTROL_COOLDOWN_MS 200
+
+static void send_consumer_control(uint16_t usage_code)
+{
+    uint8_t report[2] = {(uint8_t)(usage_code & 0xFF), (uint8_t)(usage_code >> 8)};
+    tud_hid_report(REPORT_ID_CONSUMER_CONTROL, report, 2);
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    uint8_t empty_report[2] = {0, 0};
+    tud_hid_report(REPORT_ID_CONSUMER_CONTROL, empty_report, 2);
+}
+
 const basic_key_mapping_t basic_key_mappings[] = {
     {CONFIG_KEY_A_NUM, HID_KEY_A},
     {CONFIG_KEY_B_NUM, HID_KEY_B},
@@ -97,9 +119,6 @@ const double_layer_key_t double_layer_keys[] = {
     {CONFIG_KEY_KEYPAD_DIVIDE_NUM, HID_KEY_KEYPAD_DIVIDE},
 };
 
-/**
- * @brief Bind modifier keys' numbers and their codes, such as ctrl alt and shift.
- */
 const modifier_mapping_t modifier_key_mappings[] = {
     {CONFIG_KEY_LEFT_CTRL_NUM, KEYBOARD_MODIFIER_LEFTCTRL},
     {CONFIG_KEY_LEFT_SHIFT_NUM, KEYBOARD_MODIFIER_LEFTSHIFT},
@@ -111,95 +130,109 @@ const modifier_mapping_t modifier_key_mappings[] = {
     {CONFIG_KEY_RIGHT_GUI_NUM, KEYBOARD_MODIFIER_RIGHTGUI},
 };
 
-void process_key_press(int* pressed_pins, int num_pressed_pins) {
+static bool handle_profile_consumer_action(uint16_t usage_code, TickType_t current_time)
+{
+    if ((current_time - last_volume_time) < pdMS_TO_TICKS(VOLUME_CONTROL_COOLDOWN_MS)) {
+        return true;
+    }
+
+    send_consumer_control(usage_code);
+    last_volume_time = current_time;
+    return true;
+}
+
+static void handle_profile_led_action(uint8_t action_type, TickType_t current_time)
+{
+    if ((current_time - last_led_switch_time) < pdMS_TO_TICKS(LED_CONTROL_COOLDOWN_MS)) {
+        return;
+    }
+
+    switch (action_type) {
+    case YBK_ACTION_LED_TOGGLE:
+        keyboard_profile_set_led_enabled(!led_state);
+        ESP_LOGI(TAG, "LED state changed: %s", led_state ? "ON" : "OFF");
+        break;
+    case YBK_ACTION_LED_BRIGHTNESS_UP:
+        keyboard_profile_adjust_brightness(10);
+        ESP_LOGI(TAG, "LED brightness increased");
+        break;
+    case YBK_ACTION_LED_BRIGHTNESS_DOWN:
+        keyboard_profile_adjust_brightness(-10);
+        ESP_LOGI(TAG, "LED brightness decreased");
+        break;
+    case YBK_ACTION_LED_EFFECT_NEXT:
+        keyboard_profile_next_led_mode();
+        ESP_LOGI(TAG, "LED effect changed");
+        break;
+    default:
+        return;
+    }
+
+    last_led_switch_time = current_time;
+}
+
+void process_key_press(int *pressed_pins, int num_pressed_pins)
+{
     if (num_pressed_pins == 0) {
         tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, NULL);
         return;
     }
 
-    // 声明并初始化 keycode 数组，用于存储键码
-    uint8_t keycode[6] = {0};
-    int keycode_index = 0; // 用于记录 keycode 数组的当前索引位置
-
-    // 计算修饰符
+    uint8_t keycode[MAX_PRESSED_KEYS] = {0};
+    int keycode_index = 0;
     hid_keyboard_modifier_bm_t modifier = 0;
-    for (int i = 0; i < num_pressed_pins; i++) {
-        for (int j = 0; j < sizeof(modifier_key_mappings) / sizeof(modifier_mapping_t); j++) {
-            if (pressed_pins[i] == modifier_key_mappings[j].key_num) {
-                modifier |= modifier_key_mappings[j].hid_modifier;
-            }
-        }
-    }
+    bool fn_pressed = false;
+    TickType_t current_time = xTaskGetTickCount();
 
-    // 检查是否有 Fn 键被按下
-    int fn_pressed = 0;
     for (int i = 0; i < num_pressed_pins; i++) {
-        if (pressed_pins[i] == CONFIG_KEY_FN_NUM) {
-            fn_pressed = 1;
+        const keyboard_action_t *action =
+            keyboard_profile_get_action(YBK_LAYER_BASE, (uint8_t)pressed_pins[i]);
+        if (action->type == YBK_ACTION_LAYER_FN) {
+            fn_pressed = true;
             break;
         }
     }
-    
-    if(fn_pressed && num_pressed_pins==2) {
-        if (pressed_pins[0]==CONFIG_KEY_LED_SWITCH_NUM || pressed_pins[1]==CONFIG_KEY_LED_SWITCH_NUM){
-            led_state = !led_state;
-            vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
-        }
-        else if (pressed_pins[0]==CONFIG_KEY_LED_ADD_NUM || pressed_pins[1]==CONFIG_KEY_LED_ADD_NUM){
-            led_brightness += 10;
-            if (led_brightness > 100) 
-            {
-                led_brightness = 100;
-            }
-            vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
-        }
-        else if (pressed_pins[0]==CONFIG_KEY_LED_SUB_NUM || pressed_pins[1]==CONFIG_KEY_LED_SUB_NUM){
-            led_brightness -= 10;
-            if (led_brightness < 0) 
-            {
-                led_brightness = 0;
-            }
-            vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
-        }
-        else if (pressed_pins[0]==CONFIG_KEY_LED_EFFECT_NUM || pressed_pins[1]==CONFIG_KEY_LED_EFFECT_NUM){
-            led_effects = led_effects + 1; 
-            if(led_effects>num_effects)led_effects=0;
-            vTaskDelay(pdMS_TO_TICKS(CONFIG_LED_SWITCH_SLEEP));
-        }
-        
-    }
 
-    // 遍历按下的按键，查找多层功能键
     for (int i = 0; i < num_pressed_pins; i++) {
+        uint8_t current_pin = (uint8_t)pressed_pins[i];
+        const keyboard_action_t *base_action = keyboard_profile_get_action(YBK_LAYER_BASE, current_pin);
+        const keyboard_action_t *fn_action = keyboard_profile_get_action(YBK_LAYER_FN, current_pin);
+        const keyboard_action_t *action = base_action;
+
+        if (base_action->type == YBK_ACTION_LAYER_FN) {
+            continue;
+        }
+
         if (fn_pressed) {
-            for (int j = 0; j < sizeof(double_layer_keys) / sizeof(double_layer_key_t); j++) {
-                if (pressed_pins[i] == double_layer_keys[j].key_number) {
-                    // 将多层功能键的键码存入 keycode 数组中
-                    keycode[keycode_index++] = double_layer_keys[j].secondary_key_value;
-                    // 如果 keycode 数组已满，退出循环
-                    if (keycode_index >= 6) {
-                        break;
-                    }
-                }
-            }
-        } else {
-            // 如果 Fn 未被按下，则直接将基本键码存入 keycode 数组中
-            for (int j = 0; j < sizeof(basic_key_mappings) / sizeof(basic_key_mapping_t); j++) {
-                if (pressed_pins[i] == basic_key_mappings[j].config_key_num) {
-                    keycode[keycode_index++] = basic_key_mappings[j].tusb_hid_key_num;
-                    // 如果 keycode 数组已满，退出循环
-                    if (keycode_index >= 6) {
-                        break;
-                    }
-                }
+            if (fn_action->type != YBK_ACTION_NONE) {
+                action = fn_action;
+            } else if (base_action->type != YBK_ACTION_MODIFIER) {
+                continue;
             }
         }
-        // 如果 keycode 数组已满，退出循环
-        if (keycode_index >= 6) {
+
+        switch (action->type) {
+        case YBK_ACTION_KEY:
+            if (keycode_index < MAX_PRESSED_KEYS) {
+                keycode[keycode_index++] = (uint8_t)action->code;
+            }
+            break;
+        case YBK_ACTION_MODIFIER:
+            modifier |= (hid_keyboard_modifier_bm_t)action->code;
+            break;
+        case YBK_ACTION_CONSUMER:
+            handle_profile_consumer_action(action->code, current_time);
+            break;
+        case YBK_ACTION_LED_TOGGLE:
+        case YBK_ACTION_LED_BRIGHTNESS_UP:
+        case YBK_ACTION_LED_BRIGHTNESS_DOWN:
+        case YBK_ACTION_LED_EFFECT_NEXT:
+            handle_profile_led_action(action->type, current_time);
+            break;
+        default:
             break;
         }
     }
 
-    // 发送键盘报文
     tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, modifier, keycode);
 }

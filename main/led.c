@@ -1,9 +1,33 @@
 #include "led.h"
+#include "nvs_config.h"
+#include "esp_log.h"
 
+static const char *TAG = "led";
+
+// LED 状态变量（将从 NVS 加载）
 bool led_state = false;
 int led_effects = 0;
 int led_brightness = 50;
 int num_effects = 6;
+
+/**
+ * @brief 从 NVS 加载 LED 初始状态
+ */
+void led_load_config_from_nvs(void) {
+#ifdef CONFIG_NVS_SAVE_LED_SETTINGS
+    keyboard_config_t *config = nvs_config_get_global();
+    if (config != NULL) {
+        led_state = config->led_enabled;
+        led_brightness = config->led_brightness;
+        led_effects = config->led_effect;
+        
+        ESP_LOGI(TAG, "LED config loaded from NVS:");
+        ESP_LOGI(TAG, "  State: %s", led_state ? "ON" : "OFF");
+        ESP_LOGI(TAG, "  Brightness: %d%%", led_brightness);
+        ESP_LOGI(TAG, "  Effect: %d", led_effects);
+    }
+#endif
+}
 
 led_strip_handle_t configure_led(void)
 {

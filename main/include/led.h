@@ -28,3 +28,8 @@ void hsv_to_rgb(float h, float s, float v, uint8_t *r, uint8_t *g, uint8_t *b);
 void update_led_strip(led_strip_handle_t led_strip, int effect);
 
 void led_task(void *pvParameters);
+
+/**
+ * @brief 从 NVS 加载 LED 配置
+ */
+void led_load_config_from_nvs(void);

@@ -1,6 +1,20 @@
 idf_component_register(
-    SRCS "hc165.c" "tusb_hid_example_main.c" "led.c" "key_bind.c"
-    INCLUDE_DIRS "."
-                 "./include"
-    PRIV_REQUIRES driver
-    )
+    SRCS
+        "tusb_hid_example_main.c"
+        "hc165.c"
+        "led.c"
+        "key_bind.c"
+        "nvs_config.c"
+        "keyboard_profile.c"
+        "config_protocol.c"
+        "lamp_array/lamp_array_matrix.c"
+        "lamp_array/pixel.c"
+    INCLUDE_DIRS
+        "."
+        "./include"
+        "./lamp_array"
+    PRIV_REQUIRES
+        driver
+        esp_timer
+        nvs_flash
+)

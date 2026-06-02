@@ -2,112 +2,325 @@
  * SPDX-FileCopyrightText: 2022-2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Unlicense OR CC0-1.0
+ * 
+ * 修改: 集成 Windows 11 Lamp Array 支持
  */
+
+#include "sdkconfig.h"
+
+#if !CONFIG_LED_STRIP_TEST_APP
 
 #include <stdlib.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "tinyusb.h"
+#include "tusb_cdc_acm.h"
+#include "tusb_console.h"
 #include "class/hid/hid_device.h"
 #include "driver/gpio.h"
+#include "led_strip.h"
 #include "hc165.h"
 #include "led.h"
 #include "key_bind.h"
+#include "lightmap.h"
+#include "lamp_array/lamp_array_matrix.h"
+#include "lamp_array/pixel.h"
+#include "usb_descriptors.h"
+#include "nvs_config.h"
+#include "keyboard_profile.h"
+#include "config_protocol.h"
 
-#define APP_BUTTON (GPIO_NUM_0) // Use BOOT signal by default
-static const char *TAG = "example";
+#define APP_BUTTON (GPIO_NUM_0)
+static const char *TAG = "keyboard";
+
+// LED Strip 句柄
+static led_strip_handle_t led_strip_handle = NULL;
+
+// 全局配置
+static keyboard_config_t *g_config = NULL;
 
 /************* TinyUSB descriptors ****************/
 
-#define TUSB_DESC_TOTAL_LEN      (TUD_CONFIG_DESC_LEN + CFG_TUD_HID * TUD_HID_DESC_LEN)
-
 /**
  * @brief HID report descriptor
- *
- * In this example we implement Keyboard + Mouse HID device,
- * so we must define both report descriptors
+ * 包含键盘 + 鼠标 + Consumer Control (音量) + Lamp Array (Windows 11 动态照明)
  */
 const uint8_t hid_report_descriptor[] = {
-    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(HID_ITF_PROTOCOL_KEYBOARD)),
-    TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(HID_ITF_PROTOCOL_MOUSE))
+    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(REPORT_ID_KEYBOARD)),
+    TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(REPORT_ID_MOUSE)),
+    TUD_HID_REPORT_DESC_CONSUMER(HID_REPORT_ID(REPORT_ID_CONSUMER_CONTROL)),
+    TUD_HID_REPORT_DESC_LIGHTING(REPORT_ID_LIGHTING_LAMP_ARRAY_ATTRIBUTES)
 };
 
 /**
  * @brief String descriptor
  */
-const char* hid_string_descriptor[5] = {
-    // array of pointer to string descriptors
-    (char[]){0x09, 0x04},  // 0: is supported language is English (0x0409)
-    "TinyUSB",             // 1: Manufacturer
-    "TinyUSB Device",      // 2: Product
-    "123456",              // 3: Serials, should use chip ID
-    "Example HID interface",  // 4: HID
+const char* hid_string_descriptor[] = {
+    (char[]){0x09, 0x04},
+    "Yobboy",
+    "Yobboy Keyboard",
+    "YBK001",
+    "Yobboy Keyboard HID",
+    "Yobboy Debug CDC",
+    "Yobboy Config CDC",
 };
 
 /**
  * @brief Configuration descriptor
- *
- * This is a simple configuration descriptor that defines 1 configuration and 1 HID interface
  */
-static const uint8_t hid_configuration_descriptor[] = {
-    // Configuration number, interface count, string index, total length, attribute, power in mA
-    TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+#define EPNUM_HID_IN 0x81
+#define EPNUM_CDC0_NOTIF 0x82
+#define EPNUM_CDC0_OUT 0x03
+#define EPNUM_CDC0_IN 0x83
+#define EPNUM_CDC1_NOTIF 0x84
+#define EPNUM_CDC1_OUT 0x05
+#define EPNUM_CDC1_IN 0x85
 
-    // Interface number, string index, boot protocol, report descriptor len, EP In address, size & polling interval
-    TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor), 0x81, 16, 10),
+enum {
+    ITF_NUM_HID = 0,
+    ITF_NUM_CDC0,
+    ITF_NUM_CDC0_DATA,
+    ITF_NUM_CDC1,
+    ITF_NUM_CDC1_DATA,
+    ITF_NUM_TOTAL,
+};
+
+#define YBK_USB_CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + (2 * TUD_CDC_DESC_LEN))
+
+static const uint8_t hid_configuration_descriptor[] = {
+    TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, YBK_USB_CONFIG_TOTAL_LEN,
+                         TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 4, false, sizeof(hid_report_descriptor), EPNUM_HID_IN, 16, 10),
+    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC0, 5, EPNUM_CDC0_NOTIF, 8, EPNUM_CDC0_OUT, EPNUM_CDC0_IN, 64),
+    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC1, 6, EPNUM_CDC1_NOTIF, 8, EPNUM_CDC1_OUT, EPNUM_CDC1_IN, 64),
 };
 
 /********* TinyUSB HID callbacks ***************/
 
-// Invoked when received GET HID REPORT DESCRIPTOR request
-// Application return pointer to descriptor, whose contents must exist long enough for transfer to complete
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
 {
-    // We use only one interface and one HID report descriptor, so we can ignore parameter 'instance'
+    (void) instance;
     return hid_report_descriptor;
 }
 
-// Invoked when received GET_REPORT control request
-// Application must fill buffer report's content and return its length.
-// Return zero will cause the stack to STALL request
-uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen)
+/**
+ * @brief GET_REPORT 回调 - Windows 查询 Lamp 属性
+ */
+uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, 
+                               hid_report_type_t report_type, uint8_t* buffer, uint16_t reqlen)
 {
     (void) instance;
-    (void) report_id;
-    (void) report_type;
-    (void) buffer;
     (void) reqlen;
-
-    return 0;
-}
-
-// Invoked when received SET_REPORT control request or
-// received data on OUT endpoint ( Report ID = 0, Type = 0 )
-void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize)
-{
-}
-
-// button process function
-void button_task(void *pvParameters)
-{
     
-
-    while (1) {
-        // 检测按键状态并处理按键事件
-        int pressed_pins[NUM_PRESSED_PINS_MAX];
-        int num_pressed_pins = get_pressed_pin(pressed_pins);
-        process_key_press(pressed_pins, num_pressed_pins);
-
-        // 模拟延时，这里可以使用实际系统的延时函数
-        vTaskDelay(pdMS_TO_TICKS(10)); //  毫秒延时示例
+    ESP_LOGI(TAG, "GET_REPORT: ID=%d, Type=%d", report_id, report_type);
+    
+    if (report_type != HID_REPORT_TYPE_FEATURE) {
+        return 0;
+    }
+    
+    switch (report_id) {
+        case REPORT_ID_LIGHTING_LAMP_ARRAY_ATTRIBUTES:
+            ESP_LOGI(TAG, "  → Lamp Array Attributes");
+            return GetLampArrayAttributesReport(buffer);
+            
+        case REPORT_ID_LIGHTING_LAMP_ATTRIBUTES_RESPONSE:
+            ESP_LOGI(TAG, "  → Lamp Attributes");
+            return GetLampAttributesReport(buffer);
+            
+        default:
+            return 0;
     }
 }
 
+/**
+ * @brief SET_REPORT 回调 - Windows 设置 LED 颜色
+ */
+void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, 
+                           hid_report_type_t report_type, uint8_t const* buffer, uint16_t bufsize)
+{
+    (void) instance;
+    (void) bufsize;
+    
+    ESP_LOGI(TAG, "SET_REPORT: ID=%d, Type=%d", report_id, report_type);
+    
+    if (report_type != HID_REPORT_TYPE_FEATURE) {
+        return;
+    }
+    
+    switch (report_id) {
+        case REPORT_ID_LIGHTING_LAMP_ATTRIBUTES_REQUEST:
+            ESP_LOGI(TAG, "  → Lamp Attributes Request");
+            SetLampAttributesId(buffer);
+            break;
+            
+        case REPORT_ID_LIGHTING_LAMP_MULTI_UPDATE:
+            ESP_LOGI(TAG, "  → Multi-Lamp Update");
+            SetMultipleLamps(buffer);
+            break;
+            
+        case REPORT_ID_LIGHTING_LAMP_RANGE_UPDATE:
+            ESP_LOGI(TAG, "  → Lamp Range Update");
+            SetLampRange(buffer);
+            break;
+            
+        case REPORT_ID_LIGHTING_LAMP_ARRAY_CONTROL:
+            ESP_LOGI(TAG, "  → Autonomous Mode");
+            SetAutonomousMode(buffer);
+            break;
+    }
+}
 
+/********* Tasks ***************/
+
+/**
+ * @brief 按键扫描任务
+ */
+void button_task(void *pvParameters)
+{
+    static int pressed_pins[NUM_PRESSED_PINS_MAX];
+
+    while (1) {
+        int num_pressed_pins = get_pressed_pin(pressed_pins);
+        process_key_press(pressed_pins, num_pressed_pins);
+        
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+/**
+ * @brief Lamp Array 更新任务
+ */
+void lamp_update_task(void *pvParameters)
+{
+    ESP_LOGI(TAG, "Lamp update task started");
+    
+    // 计算刷新间隔（根据 Kconfig 配置）
+#ifdef CONFIG_LED_STRIP_REFRESH_RATE
+    uint32_t refresh_interval_ms = 1000 / CONFIG_LED_STRIP_REFRESH_RATE;
+    ESP_LOGI(TAG, "LED refresh rate: %d Hz (interval: %lu ms)", 
+             CONFIG_LED_STRIP_REFRESH_RATE, (unsigned long)refresh_interval_ms);
+#else
+    uint32_t refresh_interval_ms = 10;  // 默认 100 Hz
+#endif
+    
+    while (1) {
+        // 定期刷新 LED（应用 Windows 设置的颜色）
+        NeopixelUpdateEffect();
+        
+        vTaskDelay(pdMS_TO_TICKS(refresh_interval_ms));
+    }
+}
+
+/**
+ * @brief 初始化 LED Strip
+ */
+static void init_led_strip(void)
+{
+    ESP_LOGI(TAG, "Initializing LED Strip on GPIO %d", LIGHTMAP_GPIO);
+    ESP_LOGI(TAG, "Total LEDs: %d", LIGHTMAP_NUM);
+    
+    // LED Strip 配置
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = LIGHTMAP_GPIO,
+        .max_leds = LIGHTMAP_NUM,
+        .led_pixel_format = LED_PIXEL_FORMAT_GRB,
+        .led_model = LED_MODEL_WS2812,
+        .flags.invert_out = false,
+    };
+    
+    // RMT 配置（支持 Kconfig DMA 选项）
+    led_strip_rmt_config_t rmt_config = {
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = 10000000,  // 10MHz
+#ifdef CONFIG_LED_STRIP_USE_DMA
+        .flags.with_dma = true,     // 使用 DMA（减少 CPU 占用 60%）
+#else
+        .flags.with_dma = false,    // 不使用 DMA
+#endif
+    };
+    
+    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip_handle));
+    
+#ifdef CONFIG_LED_STRIP_USE_DMA
+    ESP_LOGI(TAG, "LED DMA: Enabled (High performance mode)");
+#else
+    ESP_LOGI(TAG, "LED DMA: Disabled (Standard mode)");
+#endif
+    
+    // 默认关闭 LED，等待用户组合键开启或 Windows 控制
+    led_strip_clear(led_strip_handle);
+    led_strip_refresh(led_strip_handle);
+    
+    ESP_LOGI(TAG, "LED Strip initialized (default OFF, Windows control only)");
+}
+
+static void init_usb_cdc_interfaces(void)
+{
+    const tinyusb_config_cdcacm_t debug_cdc_cfg = {
+        .usb_dev = TINYUSB_USBDEV_0,
+        .cdc_port = TINYUSB_CDC_ACM_0,
+        .callback_rx = NULL,
+        .callback_rx_wanted_char = NULL,
+        .callback_line_state_changed = NULL,
+        .callback_line_coding_changed = NULL,
+    };
+    ESP_ERROR_CHECK(tusb_cdc_acm_init(&debug_cdc_cfg));
+
+    const tinyusb_config_cdcacm_t config_cdc_cfg = {
+        .usb_dev = TINYUSB_USBDEV_0,
+        .cdc_port = TINYUSB_CDC_ACM_1,
+        .callback_rx = NULL,
+        .callback_rx_wanted_char = NULL,
+        .callback_line_state_changed = NULL,
+        .callback_line_coding_changed = NULL,
+    };
+    ESP_ERROR_CHECK(tusb_cdc_acm_init(&config_cdc_cfg));
+
+    ESP_ERROR_CHECK(esp_tusb_init_console(TINYUSB_CDC_ACM_0));
+    ESP_ERROR_CHECK(config_protocol_start(TINYUSB_CDC_ACM_1));
+}
+
+/**
+ * @brief 主程序
+ */
 void app_main(void)
 {
-    // Initialize button that will trigger HID reports
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "Yobboy Keyboard with Windows 11 Lamp Array");
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "Features:");
+    ESP_LOGI(TAG, "  • HC165 key scanning");
+    ESP_LOGI(TAG, "  • USB HID Keyboard + Mouse + Volume Control");
+    ESP_LOGI(TAG, "  • %d RGB LEDs (WS2812)", LIGHTMAP_NUM);
+    ESP_LOGI(TAG, "  • Windows 11 Dynamic Lighting");
+#ifdef CONFIG_NVS_STORAGE_ENABLE
+    ESP_LOGI(TAG, "  • NVS Configuration Storage");
+#endif
+#ifdef CONFIG_LED_STRIP_USE_DMA
+    ESP_LOGI(TAG, "  • LED DMA Support (High Performance)");
+#endif
+    ESP_LOGI(TAG, "========================================");
+    
+    // 初始化 NVS 配置
+    ESP_LOGI(TAG, "Initializing NVS configuration...");
+    ESP_ERROR_CHECK(nvs_config_init());
+    g_config = nvs_config_get_global();
+    ESP_LOGI(TAG, "NVS configuration loaded");
+    ESP_LOGI(TAG, "  LED Brightness: %d%%", g_config->led_brightness);
+    ESP_LOGI(TAG, "  LED Effect: %d", g_config->led_effect);
+    ESP_LOGI(TAG, "  LED Enabled: %s", g_config->led_enabled ? "Yes" : "No");
+    
+    // 加载 LED 状态（默认关闭，仅 Windows 控制）
+    led_load_config_from_nvs();
+    ESP_LOGI(TAG, "Initializing keyboard runtime profile...");
+    ESP_ERROR_CHECK(keyboard_profile_init());
+    ESP_LOGI(TAG, "Keyboard profile checksum: 0x%08lx",
+             (unsigned long)keyboard_profile_get_checksum());
+    ESP_LOGI(TAG, "LED initial state: %s", led_state ? "ON" : "OFF");
+    
+    // Initialize button
     const gpio_config_t boot_button_config = {
         .pin_bit_mask = BIT64(APP_BUTTON),
         .mode = GPIO_MODE_INPUT,
@@ -116,8 +329,12 @@ void app_main(void)
         .pull_down_en = false,
     };
     ESP_ERROR_CHECK(gpio_config(&boot_button_config));
-
-    ESP_LOGI(TAG, "USB initialization");
+    
+    // Initialize LED Strip
+    init_led_strip();
+    
+    // Initialize USB
+    ESP_LOGI(TAG, "Initializing USB with Lamp Array support");
     const tinyusb_config_t tusb_cfg = {
         .device_descriptor = NULL,
         .string_descriptor = hid_string_descriptor,
@@ -125,14 +342,43 @@ void app_main(void)
         .external_phy = false,
         .configuration_descriptor = hid_configuration_descriptor,
     };
-
     ESP_ERROR_CHECK(tinyusb_driver_install(&tusb_cfg));
-    ESP_LOGI(TAG, "USB initialization DONE");
-    key_init();
-    xTaskCreate(button_task, "button_task", 2048, NULL, configMAX_PRIORITIES - 1, NULL);
+    init_usb_cdc_interfaces();
+    ESP_LOGI(TAG, "USB initialized");
     
-    xTaskCreatePinnedToCore(led_task, "led_task", 4096, NULL, configMAX_PRIORITIES - 2, NULL, tskNO_AFFINITY);
+    // Initialize Lamp Array
+    ESP_LOGI(TAG, "Initializing Lamp Array Matrix");
+    lamp_array_matrix_cfg_t lamp_cfg = {
+        .lamp_array_width = LIGHTMAP_WIDTH,
+        .lamp_array_height = LIGHTMAP_HEIGHT,
+        .lamp_array_depth = LIGHTMAP_DEPTH,
+        .lamp_array_rotation = LampPositions,
+        .pixel_cnt = LIGHTMAP_NUM,
+        .update_interval = LIGHTMAP_UPDATE_INTERVAL,
+        .handle = led_strip_handle,
+        .bind_key = 0,
+    };
+    ESP_ERROR_CHECK(lamp_array_matrix_init(lamp_cfg));
+    keyboard_profile_apply_lighting_runtime();
+    ESP_LOGI(TAG, "Lamp Array initialized: %d lamps", LIGHTMAP_NUM);
+    
+    // Initialize key scanning
+    key_init();
+    
+    // Create tasks
+    xTaskCreate(button_task, "button_task", 4096, NULL, configMAX_PRIORITIES - 1, NULL);
+    xTaskCreate(lamp_update_task, "lamp_task", 4096, NULL, configMAX_PRIORITIES - 2, NULL);
+    
+    // NOTE: 原有的 led_task 已被 lamp_update_task 替代
+    // LED 现在由 Windows Lamp Array 控制，或者在自主模式下由 pixel.c 控制
+    
+    ESP_LOGI(TAG, "========================================");
+    ESP_LOGI(TAG, "System ready!");
+    ESP_LOGI(TAG, "Windows: Settings → Personalization → Dynamic Lighting");
+    ESP_LOGI(TAG, "Device: Yobboy Keyboard");
+    ESP_LOGI(TAG, "========================================");
+    
     vTaskDelete(NULL);
-
 }
 
+#endif // !CONFIG_LED_STRIP_TEST_APP
