@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.20)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../../../hw/bsp/family_support.cmake)
 
@@ -9,6 +9,11 @@ project(${PROJECT} C CXX ASM)
 
 # Checks this example is valid for the family and initializes the project
 family_initialize_project(${PROJECT} ${CMAKE_CURRENT_LIST_DIR})
+
+# Espressif has its own cmake build system
+if(FAMILY STREQUAL "espressif")
+  return()
+endif()
 
 add_executable(${PROJECT})
 
@@ -25,8 +30,3 @@ target_include_directories(${PROJECT} PUBLIC
 # Configure compilation flags and libraries for the example without RTOS.
 # See the corresponding function in hw/bsp/FAMILY/family.cmake for details.
 family_configure_host_example(${PROJECT} noos)
-
-# Add pico-pio-usb for rp2040 since user can choose to run on bit-banging host
-if(FAMILY STREQUAL "rp2040")
-  family_add_pico_pio_usb(${PROJECT})
-endif()

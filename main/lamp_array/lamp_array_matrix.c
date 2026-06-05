@@ -119,7 +119,8 @@ void SetLampRange(const uint8_t* buffer)
 void SetAutonomousMode(const uint8_t* buffer)
 {
     LampArrayControlReport* report = (LampArrayControlReport*) buffer;
-    NeopixelSetEffect(report->autonomousMode ? AUTONOMOUS_LIGHTING_EFFECT : HID, AUTONOMOUS_LIGHTING_COLOR);
+    NeopixelSetEffect(report->autonomousMode ? AUTONOMOUS_LIGHTING_EFFECT : HID,
+                      AUTONOMOUS_LIGHTING_COLOR, 50);
     
     ESP_LOGI(TAG, "Autonomous mode: %s", report->autonomousMode ? "ON" : "OFF (Windows control)");
 }

@@ -36,17 +36,12 @@ _Pragma("GCC diagnostic ignored \"-Waddress-of-packed-member\"");
 #endif
 
 #include "host/hcd.h"
+#include "host/usbh.h"
 
-#if TU_CHECK_MCU(OPT_MCU_MSP432E4)
-  #include "musb_msp432e.h"
+#include "musb_type.h"
 
-#elif TU_CHECK_MCU(OPT_MCU_TM4C123, OPT_MCU_TM4C129)
-  #include "musb_tm4c.h"
-
-  // HACK generalize later
-  #include "musb_type.h"
-  #define FIFO0_WORD FIFO0
-
+#if TU_CHECK_MCU(OPT_MCU_MSP432E4, OPT_MCU_TM4C123, OPT_MCU_TM4C129)
+  #include "musb_ti.h"
 #else
   #error "Unsupported MCUs"
 #endif
@@ -418,7 +413,7 @@ static void process_ep0(uint8_t rhport)
   (void)rhport;
 
   uint_fast8_t csrl = USB0->CSRL0;
-  // TU_LOG1(" EP0 CSRL = %x\n", csrl);
+  // TU_LOG1(" EP0 CSRL = %x\r\n", csrl);
 
   unsigned const dev_addr = USB0->TXFUNCADDR0;
   unsigned const req = _hcd.bmRequestType;
@@ -508,7 +503,7 @@ static void process_pipe_tx(uint8_t rhport, uint_fast8_t pipenum)
 
   volatile hw_endpoint_t *regs = edpt_regs(pipenum - 1);
   unsigned const csrl = regs->TXCSRL;
-  // TU_LOG1(" TXCSRL%d = %x\n", pipenum, csrl);
+  // TU_LOG1(" TXCSRL%d = %x\r\n", pipenum, csrl);
   if (csrl & (USB_TXCSRL1_STALLED | USB_TXCSRL1_ERROR)) {
     if (csrl & USB_TXCSRL1_TXRDY)
       regs->TXCSRL = (csrl & ~(USB_TXCSRL1_STALLED | USB_TXCSRL1_ERROR)) | USB_TXCSRL1_FLUSH;
@@ -537,7 +532,7 @@ static void process_pipe_rx(uint8_t rhport, uint_fast8_t pipenum)
 
   volatile hw_endpoint_t *regs = edpt_regs(pipenum - 1);
   unsigned const csrl = regs->RXCSRL;
-  // TU_LOG1(" RXCSRL%d = %x\n", pipenum, csrl);
+  // TU_LOG1(" RXCSRL%d = %x\r\n", pipenum, csrl);
   if (csrl & (USB_RXCSRL1_STALLED | USB_RXCSRL1_ERROR)) {
     if (csrl & USB_RXCSRL1_RXRDY)
       regs->RXCSRL = (csrl & ~(USB_RXCSRL1_STALLED | USB_RXCSRL1_ERROR)) | USB_RXCSRL1_FLUSH;
@@ -562,9 +557,9 @@ static void process_pipe_rx(uint8_t rhport, uint_fast8_t pipenum)
  * Host API
  *------------------------------------------------------------------*/
 
-bool hcd_init(uint8_t rhport)
-{
-  (void)rhport;
+bool hcd_init(uint8_t rhport, const tusb_rhport_init_t* rh_init) {
+  (void) rhport;
+  (void) rh_init;
 
   NVIC_ClearPendingIRQ(USB0_IRQn);
   _hcd.bmRequestType = REQUEST_TYPE_INVALID;
@@ -701,16 +696,16 @@ bool hcd_setup_send(uint8_t rhport, uint8_t dev_addr, uint8_t const setup_packet
   _hcd.pipe0.length    = 8;
   _hcd.pipe0.remaining = 0;
 
-  hcd_devtree_info_t devtree;
-  hcd_devtree_get_info(dev_addr, &devtree);
-  switch (devtree.speed) {
+  tuh_bus_info_t bus_info;
+  tuh_bus_info_get(dev_addr, &bus_info);
+  switch (bus_info.speed) {
     default: return false;
     case TUSB_SPEED_LOW:  USB0->TYPE0 = USB_TYPE0_SPEED_LOW;  break;
     case TUSB_SPEED_FULL: USB0->TYPE0 = USB_TYPE0_SPEED_FULL; break;
     case TUSB_SPEED_HIGH: USB0->TYPE0 = USB_TYPE0_SPEED_HIGH; break;
   }
-  USB0->TXHUBADDR0     = devtree.hub_addr;
-  USB0->TXHUBPORT0     = devtree.hub_port;
+  USB0->TXHUBADDR0     = bus_info.hub_addr;
+  USB0->TXHUBPORT0     = bus_info.hub_port;
   USB0->TXFUNCADDR0    = dev_addr;
   USB0->CSRL0 = USB_CSRL0_TXRDY | USB_CSRL0_SETUP;
   return true;
@@ -750,9 +745,9 @@ bool hcd_edpt_open(uint8_t rhport, uint8_t dev_addr, tusb_desc_endpoint_t const 
   pipe->remaining = 0;
 
   uint8_t pipe_type = 0;
-  hcd_devtree_info_t devtree;
-  hcd_devtree_get_info(dev_addr, &devtree);
-  switch (devtree.speed) {
+  tuh_bus_info_t bus_info;
+  tuh_bus_info_get(dev_addr, &bus_info);
+  switch (bus_info.speed) {
     default: return false;
     case TUSB_SPEED_LOW:  pipe_type |= USB_TXTYPE1_SPEED_LOW;  break;
     case TUSB_SPEED_FULL: pipe_type |= USB_TXTYPE1_SPEED_FULL; break;
@@ -769,8 +764,8 @@ bool hcd_edpt_open(uint8_t rhport, uint8_t dev_addr, tusb_desc_endpoint_t const 
   hw_endpoint_t volatile *regs = edpt_regs(pipenum - 1);
   if (dir_tx) {
     fadr->TXFUNCADDR = dev_addr;
-    fadr->TXHUBADDR  = devtree.hub_addr;
-    fadr->TXHUBPORT  = devtree.hub_port;
+    fadr->TXHUBADDR  = bus_info.hub_addr;
+    fadr->TXHUBPORT  = bus_info.hub_port;
     regs->TXMAXP     = mps;
     regs->TXTYPE     = pipe_type | epn;
     regs->TXINTERVAL = ep_desc->bInterval;
@@ -781,8 +776,8 @@ bool hcd_edpt_open(uint8_t rhport, uint8_t dev_addr, tusb_desc_endpoint_t const 
     USB0->TXIE |= TU_BIT(pipenum);
   } else {
     fadr->RXFUNCADDR = dev_addr;
-    fadr->RXHUBADDR  = devtree.hub_addr;
-    fadr->RXHUBPORT  = devtree.hub_port;
+    fadr->RXHUBADDR  = bus_info.hub_addr;
+    fadr->RXHUBPORT  = bus_info.hub_port;
     regs->RXMAXP     = mps;
     regs->RXTYPE     = pipe_type | epn;
     regs->RXINTERVAL = ep_desc->bInterval;
@@ -810,6 +805,11 @@ bool hcd_edpt_open(uint8_t rhport, uint8_t dev_addr, tusb_desc_endpoint_t const 
   return true;
 }
 
+bool hcd_edpt_close(uint8_t rhport, uint8_t daddr, uint8_t ep_addr) {
+  (void) rhport; (void) daddr; (void) ep_addr;
+  return false; // TODO not implemented yet
+}
+
 bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t *buffer, uint16_t buflen)
 {
   (void)rhport;
@@ -822,9 +822,17 @@ bool hcd_edpt_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr, uint8_t *b
   return ret;
 }
 
+bool hcd_edpt_abort_xfer(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
+  (void) rhport;
+  (void) dev_addr;
+  (void) ep_addr;
+  // TODO not implemented yet
+  return false;
+}
+
 // clear stall, data toggle is also reset to DATA0
-bool hcd_edpt_clear_stall(uint8_t dev_addr, uint8_t ep_addr)
-{
+bool hcd_edpt_clear_stall(uint8_t rhport, uint8_t dev_addr, uint8_t ep_addr) {
+  (void) rhport;
   unsigned const pipenum = find_pipe(dev_addr, ep_addr);
   if (!pipenum) return false;
   hw_endpoint_t volatile *regs = edpt_regs(pipenum - 1);
@@ -839,14 +847,16 @@ bool hcd_edpt_clear_stall(uint8_t dev_addr, uint8_t ep_addr)
 /*-------------------------------------------------------------------
  * ISR
  *-------------------------------------------------------------------*/
-void hcd_int_handler(uint8_t rhport)
+void hcd_int_handler(uint8_t rhport, bool in_isr)
 {
+  (void) in_isr;
+
   uint_fast8_t is, txis, rxis;
 
   is   = USB0->IS;   /* read and clear interrupt status */
   txis = USB0->TXIS; /* read and clear interrupt status */
   rxis = USB0->RXIS; /* read and clear interrupt status */
-  // TU_LOG1("D%2x T%2x R%2x\n", is, txis, rxis);
+  // TU_LOG1("D%2x T%2x R%2x\r\n", is, txis, rxis);
 
   is &= USB0->IE; /* Clear disabled interrupts */
   if (is & USB_IS_RESUME) {

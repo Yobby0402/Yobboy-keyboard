@@ -10,6 +10,9 @@
 #include "hc165.h"
 #include "esp_rom_sys.h"
 #include "esp_log.h"
+#include "freertos/semphr.h"
+
+static SemaphoreHandle_t s_scan_lock = NULL;
 
 #ifdef CONFIG_HC165_MODE_HARDWARE_SPI
 #include "driver/spi_master.h"
@@ -36,6 +39,10 @@ static const char *TAG = "HC165_SPI";
 //=============================================================================
 
 void key_init(void) {
+    if (s_scan_lock == NULL) {
+        s_scan_lock = xSemaphoreCreateMutex();
+    }
+
 #ifdef CONFIG_HC165_MODE_HARDWARE_SPI
     // ======== 硬件 SPI 模式初始化 ========
     ESP_LOGI(TAG, "Initializing HC165 in Hardware SPI mode");
@@ -124,7 +131,7 @@ void key_init(void) {
 // 读取函数
 //=============================================================================
 
-int get_pressed_pin(int* pressed_pins) {
+static int get_pressed_pin_unlocked(int* pressed_pins) {
     // 清空数组
     memset(pressed_pins, 0, NUM_PRESSED_PINS_MAX * sizeof(int));
     
@@ -142,7 +149,6 @@ int get_pressed_pin(int* pressed_pins) {
 
     // 3. 通过 SPI 读取剩余 (N-1) 个按键数据
     int remaining_bits = NUM_PRESSED_PINS_MAX - 1;
-    int num_bytes = (remaining_bits + 7) / 8;  // 向上取整
     uint8_t rx_data[32] = {0};  // 最多支持 256 个按键（32 字节）
     
     if (remaining_bits > 0) {
@@ -237,4 +243,18 @@ int get_pressed_pin(int* pressed_pins) {
     return index;
     
 #endif
+}
+
+int get_pressed_pin(int* pressed_pins) {
+    if (s_scan_lock != NULL) {
+        xSemaphoreTake(s_scan_lock, portMAX_DELAY);
+    }
+
+    int ret = get_pressed_pin_unlocked(pressed_pins);
+
+    if (s_scan_lock != NULL) {
+        xSemaphoreGive(s_scan_lock);
+    }
+
+    return ret;
 }

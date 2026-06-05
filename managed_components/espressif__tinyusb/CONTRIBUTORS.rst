@@ -31,6 +31,13 @@ Notable contributors
 -  Most features development
 
 
+`Heiko Kuester <https://github.com/IngHK>`__
+--------------------------------------------
+
+-  Add CH34x and PL2303 support (CDC host)
+-  Improve FTDI and CP210x support (CDC host)
+
+
 `Hristo Gochkov <https://github.com/me-no-dev>`__
 -------------------------------------------------
 
@@ -200,6 +207,8 @@ Notable contributors
 -  Add new DCD port for Microchip SAMx7x
 -  Add IAR compiler support
 -  Improve UAC2, CDC, DFU class driver
+-  Improve stm32_fsdev, chipidea_ci_hs, lpc_ip3511 DCD
+-  Host IAR Build CI & hardware in the loop (HITL) test
 
 
 `Full contributors list <https://github.com/hathach/tinyusb/contributors>`__

@@ -1,0 +1,144 @@
+#include "keyboard_power_policy.h"
+
+#include "esp_log.h"
+#include "keyboard_power.h"
+
+static const char *TAG = "keyboard_power_policy";
+
+static keyboard_power_policy_status_t s_status = {
+    .current_mode = YBK_POWER_MODE_OFFICE,
+    .idle_low_scan_active = false,
+    .lighting_paused = false,
+    .idle_ms = 0,
+    .active_scan_interval_ms = 0,
+};
+
+static const char *mode_name(keyboard_power_mode_t mode)
+{
+    switch (mode) {
+    case YBK_POWER_MODE_GAME:
+        return "game";
+    case YBK_POWER_MODE_SAVER:
+        return "saver";
+    case YBK_POWER_MODE_OFFICE:
+    default:
+        return "office";
+    }
+}
+
+static bool transport_allows_dynamic_power(const keyboard_transport_status_t *transport)
+{
+    if (transport == NULL || transport->usb_mounted) {
+        return false;
+    }
+
+    return transport->active_mode == KEYBOARD_TRANSPORT_MODE_BLE ||
+           transport->preferred_mode == KEYBOARD_TRANSPORT_MODE_BLE ||
+           transport->ble_connected;
+}
+
+static void refresh_scan_state(void)
+{
+    s_status.current_mode = keyboard_profile_get_power_mode();
+    s_status.active_scan_interval_ms = s_status.idle_low_scan_active
+        ? keyboard_profile_get_idle_scan_interval_ms()
+        : keyboard_profile_get_scan_interval_ms();
+    s_status.lighting_paused = s_status.idle_low_scan_active;
+}
+
+esp_err_t keyboard_power_policy_init(void)
+{
+    s_status.current_mode = keyboard_profile_get_power_mode();
+    s_status.idle_low_scan_active = false;
+    s_status.lighting_paused = false;
+    s_status.idle_ms = 0;
+    refresh_scan_state();
+
+    ESP_LOGI(TAG, "Runtime mode=%s, scan=%u ms, idle scan=%u ms",
+             mode_name(s_status.current_mode),
+             keyboard_profile_get_scan_interval_ms(),
+             keyboard_profile_get_idle_scan_interval_ms());
+    return ESP_OK;
+}
+
+void keyboard_power_policy_note_activity(void)
+{
+    if (s_status.idle_low_scan_active) {
+        ESP_LOGI(TAG, "Exit idle low scan, restore %s mode (%u ms)",
+                 mode_name(keyboard_profile_get_power_mode()),
+                 keyboard_profile_get_scan_interval_ms());
+    }
+
+    s_status.idle_low_scan_active = false;
+    s_status.idle_ms = 0;
+    refresh_scan_state();
+}
+
+void keyboard_power_policy_tick(const keyboard_transport_status_t *transport)
+{
+    s_status.current_mode = keyboard_profile_get_power_mode();
+    s_status.idle_ms = keyboard_power_get_idle_ms();
+
+    if (!transport_allows_dynamic_power(transport)) {
+        if (s_status.idle_low_scan_active) {
+            ESP_LOGI(TAG, "Exit idle low scan due to transport state");
+        }
+        s_status.idle_low_scan_active = false;
+        refresh_scan_state();
+        return;
+    }
+
+    uint16_t idle_threshold = keyboard_profile_get_idle_enter_low_power_ms();
+    bool should_low_scan = idle_threshold > 0 && s_status.idle_ms >= idle_threshold;
+
+    if (should_low_scan && !s_status.idle_low_scan_active) {
+        ESP_LOGI(TAG, "Enter idle low scan after %lu ms, scan=%u ms",
+                 (unsigned long)s_status.idle_ms,
+                 keyboard_profile_get_idle_scan_interval_ms());
+    }
+
+    s_status.idle_low_scan_active = should_low_scan;
+    refresh_scan_state();
+}
+
+bool keyboard_power_policy_cycle_mode(void)
+{
+    if (!keyboard_profile_cycle_power_mode()) {
+        return false;
+    }
+
+    s_status.idle_low_scan_active = false;
+    refresh_scan_state();
+    ESP_LOGI(TAG, "Runtime mode switched to %s (%u ms)",
+             mode_name(s_status.current_mode),
+             keyboard_profile_get_scan_interval_ms());
+    return true;
+}
+
+uint8_t keyboard_power_policy_get_scan_interval_ms(uint8_t fallback_ms)
+{
+    if (s_status.active_scan_interval_ms == 0) {
+        return fallback_ms;
+    }
+    return s_status.active_scan_interval_ms;
+}
+
+bool keyboard_power_policy_should_update_lighting(void)
+{
+    return !s_status.lighting_paused;
+}
+
+bool keyboard_power_policy_should_enter_deep_sleep(const keyboard_transport_status_t *transport)
+{
+    uint32_t threshold = keyboard_profile_get_idle_enter_deep_sleep_ms();
+    if (!transport_allows_dynamic_power(transport) || threshold == 0) {
+        return false;
+    }
+
+    return keyboard_power_get_idle_ms() >= threshold;
+}
+
+const keyboard_power_policy_status_t *keyboard_power_policy_get_status(void)
+{
+    return &s_status;
+}

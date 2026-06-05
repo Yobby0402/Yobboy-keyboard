@@ -8,22 +8,261 @@
 #include "sdkconfig.h"
 #include "nvs_config.h"
 #include "led.h"
+#include "lightmap.h"
 #include "lamp_array/pixel.h"
 
 static const char *TAG = "keyboard_profile";
 
 #define PROFILE_NVS_KEY "profile2"
 #define PROFILE_BRIGHTNESS_STEP 10
+#define PROFILE_EFFECT_SPEED_DEFAULT 50
+#define PROFILE_EFFECT_SPEED_MAX 100
+#define PROFILE_LIGHTING_CYCLE_INTERVAL_DEFAULT_SEC 8
+#define PROFILE_LIGHTING_CYCLE_INTERVAL_MIN_SEC 1
+#define PROFILE_LIGHTING_CYCLE_INTERVAL_MAX_SEC 120
+#define PROFILE_SCAN_INTERVAL_MIN 1
+#define PROFILE_SCAN_INTERVAL_MAX 100
+#define PROFILE_IDLE_SCAN_INTERVAL_DEFAULT 100
+#define PROFILE_SOCD_DELAY_DEFAULT 10
+#define PROFILE_SOCD_DELAY_MAX 50
+#define PROFILE_REVERSE_TAP_DURATION_DEFAULT 12
+#define PROFILE_REVERSE_TAP_DURATION_MAX 50
+#define PROFILE_POWER_FLAGS_SOCD_ENABLED (1u << 0)
+#define PROFILE_POWER_FLAGS_SOCD_RANDOMIZE (1u << 1)
+#define PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED (1u << 2)
+#define PROFILE_POWER_FLAGS_REVERSE_TAP_RANDOMIZE (1u << 3)
+#define PROFILE_POWER_RESERVED_FLAGS 0
+#define PROFILE_POWER_RESERVED_SOCD_DELAY 1
+#define PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION 2
+#define PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY 3
 
 static keyboard_profile_t s_profile;
 static keyboard_profile_t s_pending_profile;
 static bool s_pending_valid = false;
+static keyboard_power_mode_t s_active_power_mode = YBK_POWER_MODE_OFFICE;
+static bool s_lighting_cycle_paused = false;
+static uint32_t s_lighting_cycle_elapsed_ms = 0;
 
 static const keyboard_action_t s_none_action = {
     .type = YBK_ACTION_NONE,
     .flags = 0,
     .code = 0,
 };
+
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t size;
+    uint32_t checksum;
+    keyboard_action_t keymap[YBK_LAYER_COUNT][YBK_MAX_KEYS];
+    uint8_t led_enabled;
+    uint8_t led_mode;
+    uint8_t led_brightness;
+    uint8_t led_effect_speed;
+    uint8_t led_color_r;
+    uint8_t led_color_g;
+    uint8_t led_color_b;
+    uint8_t reserved;
+    keyboard_power_profile_t power;
+} __attribute__((packed)) keyboard_profile_v3_t;
+
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t size;
+    uint32_t checksum;
+    keyboard_action_t keymap[YBK_LAYER_COUNT][YBK_MAX_KEYS];
+    uint8_t lighting_active_preset;
+    uint8_t lighting_reserved[3];
+    struct {
+        uint8_t enabled;
+        uint8_t mode;
+        uint8_t brightness;
+        uint8_t speed;
+        uint8_t red;
+        uint8_t green;
+        uint8_t blue;
+        uint8_t reserved;
+    } lighting_presets[YBK_LIGHTING_PRESET_COUNT];
+    keyboard_power_profile_t power;
+} __attribute__((packed)) keyboard_profile_v4_t;
+
+static uint8_t sanitize_active_lighting_preset(uint8_t active_index);
+static void sanitize_lighting_preset(keyboard_lighting_preset_t *preset);
+
+static keyboard_led_mode_t sanitize_lighting_mode(uint8_t mode)
+{
+    if (mode > YBK_LED_MODE_RIPPLE) {
+        return YBK_LED_MODE_SOLID;
+    }
+    return (keyboard_led_mode_t)mode;
+}
+
+static uint8_t sanitize_lighting_cycle_interval_sec(uint8_t value)
+{
+    if (value < PROFILE_LIGHTING_CYCLE_INTERVAL_MIN_SEC ||
+        value > PROFILE_LIGHTING_CYCLE_INTERVAL_MAX_SEC) {
+        return PROFILE_LIGHTING_CYCLE_INTERVAL_DEFAULT_SEC;
+    }
+    return value;
+}
+
+static bool lighting_auto_cycle_enabled_for(const keyboard_profile_t *profile)
+{
+    return profile != NULL && profile->lighting_reserved[0] != 0;
+}
+
+static void sanitize_lighting_runtime_profile(keyboard_profile_t *profile)
+{
+    if (profile == NULL) {
+        return;
+    }
+
+    profile->lighting_active_preset = sanitize_active_lighting_preset(profile->lighting_active_preset);
+    profile->lighting_reserved[0] = lighting_auto_cycle_enabled_for(profile) ? 1 : 0;
+    profile->lighting_reserved[1] = 0;
+    profile->lighting_reserved[2] = 0;
+
+    for (uint8_t i = 0; i < YBK_LIGHTING_PRESET_COUNT; i++) {
+        sanitize_lighting_preset(&profile->lighting_presets[i]);
+    }
+}
+
+static void lighting_preset_set(keyboard_lighting_preset_t *preset, bool enabled, uint8_t mode,
+                                uint8_t brightness, uint8_t speed,
+                                uint8_t red, uint8_t green, uint8_t blue)
+{
+    if (preset == NULL) {
+        return;
+    }
+
+    preset->enabled = enabled ? 1 : 0;
+    preset->mode = (uint8_t)sanitize_lighting_mode(mode);
+    preset->brightness = brightness > 100 ? 100 : brightness;
+    preset->speed = speed == 0 ? PROFILE_EFFECT_SPEED_DEFAULT :
+                    (speed > PROFILE_EFFECT_SPEED_MAX ? PROFILE_EFFECT_SPEED_MAX : speed);
+    preset->red = red;
+    preset->green = green;
+    preset->blue = blue;
+    preset->reserved = PROFILE_LIGHTING_CYCLE_INTERVAL_DEFAULT_SEC;
+    memset(preset->key_mask, 0, sizeof(preset->key_mask));
+    memset(preset->per_key, 0, sizeof(preset->per_key));
+}
+
+static void sanitize_lighting_preset(keyboard_lighting_preset_t *preset)
+{
+    if (preset == NULL) {
+        return;
+    }
+
+    preset->enabled = preset->enabled ? 1 : 0;
+    preset->mode = (uint8_t)sanitize_lighting_mode(preset->mode);
+    if (preset->brightness > 100) {
+        preset->brightness = 100;
+    }
+    preset->speed = preset->speed == 0 ? PROFILE_EFFECT_SPEED_DEFAULT :
+                    (preset->speed > PROFILE_EFFECT_SPEED_MAX ? PROFILE_EFFECT_SPEED_MAX : preset->speed);
+    preset->reserved = sanitize_lighting_cycle_interval_sec(preset->reserved);
+    for (uint8_t key = 0; key < YBK_MAX_KEYS; key++) {
+        if (preset->per_key[key].brightness > 100) {
+            preset->per_key[key].brightness = 100;
+        }
+    }
+}
+
+static uint8_t sanitize_active_lighting_preset(uint8_t active_index)
+{
+    if (active_index >= YBK_LIGHTING_PRESET_COUNT) {
+        return 0;
+    }
+    return active_index;
+}
+
+static uint8_t enabled_lighting_preset_count(const keyboard_profile_t *profile)
+{
+    if (profile == NULL) {
+        return 0;
+    }
+
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < YBK_LIGHTING_PRESET_COUNT; i++) {
+        if (profile->lighting_presets[i].enabled) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static bool key_mask_get(const uint8_t *mask, uint8_t key_num)
+{
+    if (mask == NULL || key_num >= YBK_MAX_KEYS) {
+        return false;
+    }
+
+    return (mask[key_num / 8] & (uint8_t)(1u << (key_num % 8))) != 0;
+}
+
+static keyboard_power_mode_t sanitize_power_mode(uint8_t mode)
+{
+    if (mode > YBK_POWER_MODE_SAVER) {
+        return YBK_POWER_MODE_OFFICE;
+    }
+    return (keyboard_power_mode_t)mode;
+}
+
+static uint8_t sanitize_scan_interval(uint8_t value, uint8_t fallback)
+{
+    if (value < PROFILE_SCAN_INTERVAL_MIN || value > PROFILE_SCAN_INTERVAL_MAX) {
+        return fallback;
+    }
+    return value;
+}
+
+static uint8_t sanitize_socd_delay(uint8_t value)
+{
+    if (value > PROFILE_SOCD_DELAY_MAX) {
+        return PROFILE_SOCD_DELAY_DEFAULT;
+    }
+    return value;
+}
+
+static uint8_t sanitize_reverse_tap_duration(uint8_t value)
+{
+    if (value > PROFILE_REVERSE_TAP_DURATION_MAX) {
+        return PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+    }
+    return value;
+}
+
+static void sanitize_power_profile(keyboard_power_profile_t *power)
+{
+    if (power == NULL) {
+        return;
+    }
+
+    power->default_mode = (uint8_t)sanitize_power_mode(power->default_mode);
+    power->allow_mode_cycle = power->allow_mode_cycle ? 1 : 0;
+    power->scan_interval_game_ms = sanitize_scan_interval(power->scan_interval_game_ms, 1);
+    power->scan_interval_office_ms = sanitize_scan_interval(power->scan_interval_office_ms, 4);
+    power->scan_interval_saver_ms = sanitize_scan_interval(power->scan_interval_saver_ms, 8);
+    power->idle_scan_interval_ms = sanitize_scan_interval(power->idle_scan_interval_ms,
+                                                          PROFILE_IDLE_SCAN_INTERVAL_DEFAULT);
+    power->reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] =
+        sanitize_socd_delay(power->reserved[PROFILE_POWER_RESERVED_SOCD_DELAY]);
+    power->reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] =
+        sanitize_reverse_tap_duration(power->reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION]);
+    power->reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] =
+        sanitize_reverse_tap_duration(power->reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY]);
+    power->reserved[PROFILE_POWER_RESERVED_FLAGS] &= (PROFILE_POWER_FLAGS_SOCD_ENABLED |
+                                                      PROFILE_POWER_FLAGS_SOCD_RANDOMIZE |
+                                                      PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED |
+                                                      PROFILE_POWER_FLAGS_REVERSE_TAP_RANDOMIZE);
+}
+
+static void reset_runtime_power_mode(void)
+{
+    s_active_power_mode = sanitize_power_mode(s_profile.power.default_mode);
+}
 
 static uint32_t checksum_update(uint32_t hash, const uint8_t *data, size_t len)
 {
@@ -215,14 +454,30 @@ void keyboard_profile_set_default(keyboard_profile_t *profile)
     set_action_if_empty(profile, YBK_LAYER_FN, CONFIG_KEY_LED_ADD_NUM, YBK_ACTION_LED_BRIGHTNESS_UP, 0);
     set_action_if_empty(profile, YBK_LAYER_FN, CONFIG_KEY_LED_SUB_NUM, YBK_ACTION_LED_BRIGHTNESS_DOWN, 0);
     set_action_if_empty(profile, YBK_LAYER_FN, CONFIG_KEY_LED_EFFECT_NUM, YBK_ACTION_LED_EFFECT_NEXT, 0);
+    set_action_if_empty(profile, YBK_LAYER_FN, CONFIG_KEY_ESCAPE_NUM, YBK_ACTION_POWER_MODE_NEXT, 0);
 
-    profile->led_enabled = DEFAULT_LED_ENABLED;
-    profile->led_mode = YBK_LED_MODE_HID;
-    profile->led_brightness = DEFAULT_LED_BRIGHTNESS;
-    profile->led_effect_speed = 50;
-    profile->led_color_r = 255;
-    profile->led_color_g = 255;
-    profile->led_color_b = 255;
+    profile->lighting_active_preset = 0;
+    memset(profile->lighting_reserved, 0, sizeof(profile->lighting_reserved));
+    lighting_preset_set(&profile->lighting_presets[0], false, YBK_LED_MODE_SOLID, 100, 50, 255, 255, 255);
+    lighting_preset_set(&profile->lighting_presets[1], true, YBK_LED_MODE_SOLID, 100, 50, 255, 255, 255);
+    lighting_preset_set(&profile->lighting_presets[2], true, YBK_LED_MODE_BREATH, 80, 35, 80, 220, 255);
+    lighting_preset_set(&profile->lighting_presets[3], false, YBK_LED_MODE_WAVE, 100, 35, 80, 120, 255);
+    lighting_preset_set(&profile->lighting_presets[4], false, YBK_LED_MODE_RAINBOW, 100, 40, 255, 255, 255);
+    lighting_preset_set(&profile->lighting_presets[5], false, YBK_LED_MODE_HID, 100, 50, 255, 255, 255);
+    profile->power.default_mode = YBK_POWER_MODE_OFFICE;
+    profile->power.allow_mode_cycle = 1;
+    profile->power.scan_interval_game_ms = 1;
+    profile->power.scan_interval_office_ms = 4;
+    profile->power.scan_interval_saver_ms = 8;
+    profile->power.idle_scan_interval_ms = PROFILE_IDLE_SCAN_INTERVAL_DEFAULT;
+    profile->power.idle_enter_low_power_ms = 15000;
+    profile->power.idle_enter_deep_sleep_ms = 180000;
+    memset(profile->power.reserved, 0, sizeof(profile->power.reserved));
+    profile->power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] = PROFILE_SOCD_DELAY_DEFAULT;
+    profile->power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] =
+        PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+    profile->power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] = 0;
+    sanitize_power_profile(&profile->power);
 
     profile_fix_checksum(profile);
 }
@@ -243,44 +498,217 @@ bool keyboard_profile_validate(const keyboard_profile_t *profile)
         return false;
     }
 
-    if (profile->led_mode > YBK_LED_MODE_BLINK || profile->led_brightness > 100) {
+    if (profile->lighting_active_preset >= YBK_LIGHTING_PRESET_COUNT) {
         return false;
     }
-
-    for (uint8_t layer = 0; layer < YBK_LAYER_COUNT; layer++) {
+    if (profile->lighting_reserved[0] > 1) {
+        return false;
+    }
+    for (uint8_t i = 0; i < YBK_LIGHTING_PRESET_COUNT; i++) {
+        const keyboard_lighting_preset_t *preset = &profile->lighting_presets[i];
+        if (preset->mode > YBK_LED_MODE_RIPPLE ||
+            preset->brightness > 100 ||
+            preset->speed > PROFILE_EFFECT_SPEED_MAX ||
+            (preset->reserved != 0 &&
+             (preset->reserved < PROFILE_LIGHTING_CYCLE_INTERVAL_MIN_SEC ||
+              preset->reserved > PROFILE_LIGHTING_CYCLE_INTERVAL_MAX_SEC))) {
+            return false;
+        }
         for (uint8_t key = 0; key < YBK_MAX_KEYS; key++) {
-            uint8_t type = profile->keymap[layer][key].type;
-            if (type > YBK_ACTION_LED_EFFECT_NEXT) {
+            if (preset->per_key[key].brightness > 100) {
                 return false;
             }
         }
     }
 
-    return true;
+    if (profile->power.default_mode > YBK_POWER_MODE_SAVER ||
+        profile->power.allow_mode_cycle > 1) {
+        return false;
+    }
+    if (profile->power.scan_interval_game_ms < PROFILE_SCAN_INTERVAL_MIN ||
+        profile->power.scan_interval_game_ms > PROFILE_SCAN_INTERVAL_MAX ||
+        profile->power.scan_interval_office_ms < PROFILE_SCAN_INTERVAL_MIN ||
+        profile->power.scan_interval_office_ms > PROFILE_SCAN_INTERVAL_MAX ||
+        profile->power.scan_interval_saver_ms < PROFILE_SCAN_INTERVAL_MIN ||
+        profile->power.scan_interval_saver_ms > PROFILE_SCAN_INTERVAL_MAX ||
+        profile->power.idle_scan_interval_ms < PROFILE_SCAN_INTERVAL_MIN ||
+        profile->power.idle_scan_interval_ms > PROFILE_SCAN_INTERVAL_MAX ||
+        (profile->power.reserved[PROFILE_POWER_RESERVED_FLAGS] &
+         ~(PROFILE_POWER_FLAGS_SOCD_ENABLED |
+           PROFILE_POWER_FLAGS_SOCD_RANDOMIZE |
+           PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED |
+           PROFILE_POWER_FLAGS_REVERSE_TAP_RANDOMIZE)) != 0 ||
+        profile->power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] > PROFILE_SOCD_DELAY_MAX ||
+        profile->power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] > PROFILE_REVERSE_TAP_DURATION_MAX ||
+        profile->power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] > PROFILE_REVERSE_TAP_DURATION_MAX) {
+        return false;
+    }
+
+    bool has_input_action = false;
+    for (uint8_t layer = 0; layer < YBK_LAYER_COUNT; layer++) {
+        for (uint8_t key = 0; key < YBK_MAX_KEYS; key++) {
+            uint8_t type = profile->keymap[layer][key].type;
+            if (type > YBK_ACTION_POWER_MODE_NEXT) {
+                return false;
+            }
+            if (type == YBK_ACTION_KEY ||
+                type == YBK_ACTION_MODIFIER ||
+                type == YBK_ACTION_LAYER_FN) {
+                has_input_action = true;
+            }
+        }
+    }
+
+    return has_input_action;
 }
 
 static esp_err_t load_profile_from_nvs(keyboard_profile_t *profile)
 {
 #ifdef CONFIG_NVS_STORAGE_ENABLE
     nvs_handle_t handle;
-    size_t size = sizeof(*profile);
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
     if (ret != ESP_OK) {
         return ret;
     }
 
-    ret = nvs_get_blob(handle, PROFILE_NVS_KEY, profile, &size);
-    nvs_close(handle);
-
+    size_t size = 0;
+    ret = nvs_get_blob(handle, PROFILE_NVS_KEY, NULL, &size);
     if (ret != ESP_OK) {
+        nvs_close(handle);
         return ret;
     }
 
-    if (size != sizeof(*profile) || !keyboard_profile_validate(profile)) {
+    if (size == sizeof(*profile)) {
+        keyboard_profile_t stored = {0};
+        ret = nvs_get_blob(handle, PROFILE_NVS_KEY, &stored, &size);
+        nvs_close(handle);
+
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        if (stored.magic != YBK_PROFILE_MAGIC || stored.size != sizeof(stored)) {
+            return ESP_ERR_INVALID_CRC;
+        }
+
+        if (stored.checksum != 0 && stored.checksum != calculate_profile_checksum(&stored)) {
+            return ESP_ERR_INVALID_CRC;
+        }
+
+        if (stored.version == YBK_PROFILE_VERSION) {
+            if (!keyboard_profile_validate(&stored)) {
+                return ESP_ERR_INVALID_CRC;
+            }
+            sanitize_power_profile(&stored.power);
+            sanitize_lighting_runtime_profile(&stored);
+            *profile = stored;
+            return ESP_OK;
+        }
+
+        if (stored.version == 7 || stored.version == 6 || stored.version == 5) {
+            keyboard_profile_t migrated = stored;
+            migrated.version = YBK_PROFILE_VERSION;
+            uint8_t old_socd_enabled = migrated.power.reserved[0];
+            uint8_t old_socd_delay = migrated.power.reserved[1];
+            uint8_t old_socd_randomize = migrated.power.reserved[2];
+            memset(migrated.power.reserved, 0, sizeof(migrated.power.reserved));
+            if (old_socd_enabled) {
+                migrated.power.reserved[PROFILE_POWER_RESERVED_FLAGS] |= PROFILE_POWER_FLAGS_SOCD_ENABLED;
+            }
+            if (old_socd_randomize) {
+                migrated.power.reserved[PROFILE_POWER_RESERVED_FLAGS] |= PROFILE_POWER_FLAGS_SOCD_RANDOMIZE;
+            }
+            migrated.power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] = old_socd_delay;
+            migrated.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] =
+                PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+            migrated.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] = 0;
+            if (stored.version == 5) {
+                migrated.lighting_reserved[0] = 0;
+            }
+            sanitize_power_profile(&migrated.power);
+            sanitize_lighting_runtime_profile(&migrated);
+            profile_fix_checksum(&migrated);
+            *profile = migrated;
+            return ESP_OK;
+        }
+
         return ESP_ERR_INVALID_CRC;
     }
 
-    return ESP_OK;
+    if (size == sizeof(keyboard_profile_v4_t)) {
+        keyboard_profile_v4_t legacy = {0};
+        ret = nvs_get_blob(handle, PROFILE_NVS_KEY, &legacy, &size);
+        nvs_close(handle);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        if (legacy.magic != YBK_PROFILE_MAGIC ||
+            legacy.version != 4 ||
+            legacy.size != sizeof(legacy)) {
+            return ESP_ERR_INVALID_CRC;
+        }
+
+        keyboard_profile_t migrated = {0};
+        keyboard_profile_set_default(&migrated);
+        memcpy(migrated.keymap, legacy.keymap, sizeof(migrated.keymap));
+        migrated.power = legacy.power;
+        migrated.lighting_active_preset = sanitize_active_lighting_preset(legacy.lighting_active_preset);
+        memset(migrated.lighting_reserved, 0, sizeof(migrated.lighting_reserved));
+        for (uint8_t i = 0; i < YBK_LIGHTING_PRESET_COUNT; i++) {
+            lighting_preset_set(&migrated.lighting_presets[i],
+                                legacy.lighting_presets[i].enabled != 0,
+                                legacy.lighting_presets[i].mode,
+                                legacy.lighting_presets[i].brightness,
+                                legacy.lighting_presets[i].speed,
+                                legacy.lighting_presets[i].red,
+                                legacy.lighting_presets[i].green,
+                                legacy.lighting_presets[i].blue);
+        }
+        sanitize_power_profile(&migrated.power);
+        sanitize_lighting_runtime_profile(&migrated);
+        profile_fix_checksum(&migrated);
+        *profile = migrated;
+        return ESP_OK;
+    }
+
+    if (size == sizeof(keyboard_profile_v3_t)) {
+        keyboard_profile_v3_t legacy = {0};
+        ret = nvs_get_blob(handle, PROFILE_NVS_KEY, &legacy, &size);
+        nvs_close(handle);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+
+        if (legacy.magic != YBK_PROFILE_MAGIC ||
+            legacy.version != 3 ||
+            legacy.size != sizeof(legacy)) {
+            return ESP_ERR_INVALID_CRC;
+        }
+
+        keyboard_profile_t migrated = {0};
+        keyboard_profile_set_default(&migrated);
+        memcpy(migrated.keymap, legacy.keymap, sizeof(migrated.keymap));
+        migrated.power = legacy.power;
+        memset(migrated.lighting_reserved, 0, sizeof(migrated.lighting_reserved));
+        lighting_preset_set(&migrated.lighting_presets[0],
+                            legacy.led_enabled != 0,
+                            legacy.led_mode,
+                            legacy.led_brightness,
+                            legacy.led_effect_speed,
+                            legacy.led_color_r,
+                            legacy.led_color_g,
+                            legacy.led_color_b);
+        migrated.lighting_active_preset = 0;
+        sanitize_power_profile(&migrated.power);
+        sanitize_lighting_runtime_profile(&migrated);
+        profile_fix_checksum(&migrated);
+        *profile = migrated;
+        return ESP_OK;
+    }
+
+    nvs_close(handle);
+    return ESP_ERR_INVALID_SIZE;
 #else
     (void)profile;
     return ESP_ERR_NOT_SUPPORTED;
@@ -322,8 +750,85 @@ static LampColor make_scaled_color(uint8_t brightness, uint8_t red, uint8_t gree
     return color;
 }
 
-static void apply_lighting_values(uint8_t mode, bool enabled, uint8_t brightness,
-                                  uint8_t red, uint8_t green, uint8_t blue)
+static void build_static_lamp_colors(const keyboard_lighting_preset_t *preset, LampColor *lamp_colors,
+                                     uint32_t lamp_count)
+{
+    if (preset == NULL || lamp_colors == NULL) {
+        return;
+    }
+
+    memset(lamp_colors, 0, lamp_count * sizeof(*lamp_colors));
+
+    for (uint32_t lamp = 0; lamp < lamp_count; lamp++) {
+        uint8_t key_num = LED_to_Key_Map[lamp];
+        if (key_num == 0xFF || key_num >= YBK_MAX_KEYS) {
+            continue;
+        }
+
+        if (preset->mode == YBK_LED_MODE_GROUP_STATIC) {
+            if (!key_mask_get(preset->key_mask, key_num)) {
+                continue;
+            }
+            lamp_colors[lamp] = make_scaled_color(preset->brightness, preset->red, preset->green, preset->blue);
+            continue;
+        }
+
+        if (preset->mode == YBK_LED_MODE_PER_KEY_STATIC) {
+            const keyboard_lighting_key_color_t *key_color = &preset->per_key[key_num];
+            if (key_color->brightness == 0) {
+                continue;
+            }
+            lamp_colors[lamp] = make_scaled_color(key_color->brightness,
+                                                  key_color->red,
+                                                  key_color->green,
+                                                  key_color->blue);
+        }
+    }
+}
+
+static uint8_t normalize_effect_speed(uint8_t speed)
+{
+    if (speed == 0) {
+        return PROFILE_EFFECT_SPEED_DEFAULT;
+    }
+    if (speed > PROFILE_EFFECT_SPEED_MAX) {
+        return PROFILE_EFFECT_SPEED_MAX;
+    }
+    return speed;
+}
+
+static keyboard_lighting_preset_t *active_lighting_preset_mutable(void)
+{
+    return &s_profile.lighting_presets[sanitize_active_lighting_preset(s_profile.lighting_active_preset)];
+}
+
+static const keyboard_lighting_preset_t *active_lighting_preset(void)
+{
+    return &s_profile.lighting_presets[sanitize_active_lighting_preset(s_profile.lighting_active_preset)];
+}
+
+static bool find_next_enabled_lighting_preset(uint8_t *index_out)
+{
+    if (index_out == NULL) {
+        return false;
+    }
+
+    uint8_t current = sanitize_active_lighting_preset(s_profile.lighting_active_preset);
+
+    for (uint8_t offset = 1; offset <= YBK_LIGHTING_PRESET_COUNT; offset++) {
+        uint8_t candidate = (uint8_t)((current + offset) % YBK_LIGHTING_PRESET_COUNT);
+        if (s_profile.lighting_presets[candidate].enabled) {
+            *index_out = candidate;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void apply_lighting_values(uint8_t mode, bool enabled, uint8_t brightness, uint8_t speed,
+                                  uint8_t red, uint8_t green, uint8_t blue,
+                                  const keyboard_lighting_preset_t *preset)
 {
     led_state = enabled;
     led_brightness = brightness;
@@ -333,10 +838,25 @@ static void apply_lighting_values(uint8_t mode, bool enabled, uint8_t brightness
     NeopixelEffect effect = HID;
     if (mode == YBK_LED_MODE_SOLID) {
         effect = SOLID;
-    } else if (mode == YBK_LED_MODE_BLINK) {
-        effect = BLINK;
+    } else if (mode == YBK_LED_MODE_BREATH) {
+        effect = BREATH;
+    } else if (mode == YBK_LED_MODE_RAINBOW) {
+        effect = RAINBOW;
+    } else if (mode == YBK_LED_MODE_WAVE) {
+        effect = WAVE;
+    } else if (mode == YBK_LED_MODE_KEY_FADE) {
+        effect = REACTIVE_FADE;
+    } else if (mode == YBK_LED_MODE_RIPPLE) {
+        effect = RIPPLE;
+    } else if (mode == YBK_LED_MODE_GROUP_STATIC || mode == YBK_LED_MODE_PER_KEY_STATIC) {
+        effect = STATIC_MAP;
     }
-    NeopixelSetEffect(effect, color);
+    NeopixelSetEffect(effect, color, normalize_effect_speed(speed));
+    if (effect == STATIC_MAP && preset != NULL) {
+        LampColor lamp_colors[LIGHTMAP_NUM];
+        build_static_lamp_colors(preset, lamp_colors, LIGHTMAP_NUM);
+        NeopixelSetCustomColors(lamp_colors, LIGHTMAP_NUM);
+    }
 }
 
 esp_err_t keyboard_profile_init(void)
@@ -347,15 +867,16 @@ esp_err_t keyboard_profile_init(void)
     esp_err_t ret = load_profile_from_nvs(&loaded);
     if (ret == ESP_OK) {
         s_profile = loaded;
+        sanitize_power_profile(&s_profile.power);
+        sanitize_lighting_runtime_profile(&s_profile);
         ESP_LOGI(TAG, "Profile loaded: checksum=0x%08lx", (unsigned long)s_profile.checksum);
     } else {
         ESP_LOGW(TAG, "Using default profile: %s", esp_err_to_name(ret));
         ESP_ERROR_CHECK_WITHOUT_ABORT(save_profile_to_nvs(&s_profile));
     }
 
-    led_state = s_profile.led_enabled;
-    led_brightness = s_profile.led_brightness;
-    led_effects = s_profile.led_mode;
+    reset_runtime_power_mode();
+    keyboard_profile_apply_lighting_runtime();
     return ESP_OK;
 }
 
@@ -377,6 +898,110 @@ uint32_t keyboard_profile_get_checksum(void)
     return s_profile.checksum;
 }
 
+const keyboard_power_profile_t *keyboard_profile_get_power_profile(void)
+{
+    return &s_profile.power;
+}
+
+keyboard_power_mode_t keyboard_profile_get_power_mode(void)
+{
+    return s_active_power_mode;
+}
+
+uint8_t keyboard_profile_get_scan_interval_ms(void)
+{
+    switch (s_active_power_mode) {
+    case YBK_POWER_MODE_GAME:
+        return s_profile.power.scan_interval_game_ms;
+    case YBK_POWER_MODE_SAVER:
+        return s_profile.power.scan_interval_saver_ms;
+    case YBK_POWER_MODE_OFFICE:
+    default:
+        return s_profile.power.scan_interval_office_ms;
+    }
+}
+
+uint8_t keyboard_profile_get_idle_scan_interval_ms(void)
+{
+    return s_profile.power.idle_scan_interval_ms;
+}
+
+uint16_t keyboard_profile_get_idle_enter_low_power_ms(void)
+{
+    return s_profile.power.idle_enter_low_power_ms;
+}
+
+uint32_t keyboard_profile_get_idle_enter_deep_sleep_ms(void)
+{
+    return s_profile.power.idle_enter_deep_sleep_ms;
+}
+
+bool keyboard_profile_socd_enabled(void)
+{
+    return (s_profile.power.reserved[PROFILE_POWER_RESERVED_FLAGS] & PROFILE_POWER_FLAGS_SOCD_ENABLED) != 0;
+}
+
+uint8_t keyboard_profile_socd_delay_ms(void)
+{
+    return sanitize_socd_delay(s_profile.power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY]);
+}
+
+bool keyboard_profile_socd_randomize(void)
+{
+    return (s_profile.power.reserved[PROFILE_POWER_RESERVED_FLAGS] & PROFILE_POWER_FLAGS_SOCD_RANDOMIZE) != 0;
+}
+
+bool keyboard_profile_reverse_tap_enabled(void)
+{
+    return (s_profile.power.reserved[PROFILE_POWER_RESERVED_FLAGS] &
+            PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED) != 0;
+}
+
+uint8_t keyboard_profile_reverse_tap_delay_ms(void)
+{
+    return sanitize_reverse_tap_duration(
+        s_profile.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY]);
+}
+
+uint8_t keyboard_profile_reverse_tap_duration_ms(void)
+{
+    return sanitize_reverse_tap_duration(
+        s_profile.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION]);
+}
+
+bool keyboard_profile_reverse_tap_randomize(void)
+{
+    return (s_profile.power.reserved[PROFILE_POWER_RESERVED_FLAGS] &
+            PROFILE_POWER_FLAGS_REVERSE_TAP_RANDOMIZE) != 0;
+}
+
+bool keyboard_profile_allow_power_mode_cycle(void)
+{
+    return s_profile.power.allow_mode_cycle != 0;
+}
+
+bool keyboard_profile_cycle_power_mode(void)
+{
+    if (!keyboard_profile_allow_power_mode_cycle()) {
+        return false;
+    }
+
+    switch (s_active_power_mode) {
+    case YBK_POWER_MODE_GAME:
+        s_active_power_mode = YBK_POWER_MODE_OFFICE;
+        break;
+    case YBK_POWER_MODE_OFFICE:
+        s_active_power_mode = YBK_POWER_MODE_SAVER;
+        break;
+    case YBK_POWER_MODE_SAVER:
+    default:
+        s_active_power_mode = YBK_POWER_MODE_GAME;
+        break;
+    }
+
+    return true;
+}
+
 esp_err_t keyboard_profile_stage(const uint8_t *data, size_t len)
 {
     if (data == NULL || len != sizeof(keyboard_profile_t)) {
@@ -385,6 +1010,30 @@ esp_err_t keyboard_profile_stage(const uint8_t *data, size_t len)
 
     keyboard_profile_t candidate;
     memcpy(&candidate, data, sizeof(candidate));
+    uint16_t original_version = candidate.version;
+    if (original_version == 7 || original_version == 6 || original_version == 5) {
+        uint8_t old_socd_enabled = candidate.power.reserved[0];
+        uint8_t old_socd_delay = candidate.power.reserved[1];
+        uint8_t old_socd_randomize = candidate.power.reserved[2];
+        candidate.version = YBK_PROFILE_VERSION;
+        memset(candidate.power.reserved, 0, sizeof(candidate.power.reserved));
+        if (old_socd_enabled) {
+            candidate.power.reserved[PROFILE_POWER_RESERVED_FLAGS] |= PROFILE_POWER_FLAGS_SOCD_ENABLED;
+        }
+        if (old_socd_randomize) {
+            candidate.power.reserved[PROFILE_POWER_RESERVED_FLAGS] |= PROFILE_POWER_FLAGS_SOCD_RANDOMIZE;
+        }
+        candidate.power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] = old_socd_delay;
+        candidate.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] =
+            PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+        candidate.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] = 0;
+        if (original_version == 5) {
+            candidate.lighting_reserved[0] = 0;
+            candidate.lighting_reserved[1] = 0;
+            candidate.lighting_reserved[2] = 0;
+        }
+        candidate.checksum = 0;
+    }
     if (candidate.checksum == 0) {
         profile_fix_checksum(&candidate);
     }
@@ -393,6 +1042,8 @@ esp_err_t keyboard_profile_stage(const uint8_t *data, size_t len)
         return ESP_ERR_INVALID_ARG;
     }
 
+    sanitize_power_profile(&candidate.power);
+    sanitize_lighting_runtime_profile(&candidate);
     profile_fix_checksum(&candidate);
     s_pending_profile = candidate;
     s_pending_valid = true;
@@ -409,6 +1060,8 @@ esp_err_t keyboard_profile_commit_staged(void)
     esp_err_t ret = save_profile_to_nvs(&s_profile);
     if (ret == ESP_OK) {
         s_pending_valid = false;
+        reset_runtime_power_mode();
+        s_lighting_cycle_paused = false;
         keyboard_profile_apply_lighting_runtime();
     }
     return ret;
@@ -417,6 +1070,8 @@ esp_err_t keyboard_profile_commit_staged(void)
 esp_err_t keyboard_profile_reset_default(void)
 {
     keyboard_profile_set_default(&s_profile);
+    reset_runtime_power_mode();
+    s_lighting_cycle_paused = false;
     keyboard_profile_apply_lighting_runtime();
     return save_profile_to_nvs(&s_profile);
 }
@@ -429,54 +1084,128 @@ esp_err_t keyboard_profile_save_active(void)
 
 void keyboard_profile_apply_lighting_runtime(void)
 {
-    apply_lighting_values(s_profile.led_mode,
-                          s_profile.led_enabled,
-                          s_profile.led_brightness,
-                          s_profile.led_color_r,
-                          s_profile.led_color_g,
-                          s_profile.led_color_b);
+    const keyboard_lighting_preset_t *preset = active_lighting_preset();
+    s_lighting_cycle_elapsed_ms = 0;
+    apply_lighting_values(preset->mode,
+                          preset->enabled != 0,
+                          preset->brightness,
+                          preset->speed,
+                          preset->red,
+                          preset->green,
+                          preset->blue,
+                          preset);
 }
 
-void keyboard_profile_preview_lighting(uint8_t mode, bool enabled, uint8_t brightness,
+void keyboard_profile_lighting_tick(uint32_t elapsed_ms)
+{
+    if (elapsed_ms == 0 ||
+        !lighting_auto_cycle_enabled_for(&s_profile) ||
+        s_lighting_cycle_paused ||
+        enabled_lighting_preset_count(&s_profile) < 2) {
+        return;
+    }
+
+    const keyboard_lighting_preset_t *preset = active_lighting_preset();
+    uint32_t interval_ms = (uint32_t)sanitize_lighting_cycle_interval_sec(preset->reserved) * 1000u;
+    if (interval_ms == 0) {
+        return;
+    }
+
+    s_lighting_cycle_elapsed_ms += elapsed_ms;
+    if (s_lighting_cycle_elapsed_ms < interval_ms) {
+        return;
+    }
+
+    uint8_t next_preset = 0;
+    if (!find_next_enabled_lighting_preset(&next_preset) || next_preset == s_profile.lighting_active_preset) {
+        s_lighting_cycle_elapsed_ms = 0;
+        return;
+    }
+
+    s_profile.lighting_active_preset = next_preset;
+    keyboard_profile_apply_lighting_runtime();
+}
+
+void keyboard_profile_preview_lighting(uint8_t mode, bool enabled, uint8_t brightness, uint8_t speed,
                                        uint8_t red, uint8_t green, uint8_t blue)
 {
-    if (mode > YBK_LED_MODE_BLINK) {
+    if (mode > YBK_LED_MODE_RIPPLE) {
         mode = YBK_LED_MODE_HID;
     }
     if (brightness > 100) {
         brightness = 100;
     }
-    apply_lighting_values(mode, enabled, brightness, red, green, blue);
+    apply_lighting_values(mode, enabled, brightness, speed, red, green, blue, NULL);
+}
+
+void keyboard_profile_preview_lighting_preset(const keyboard_lighting_preset_t *preset)
+{
+    if (preset == NULL) {
+        return;
+    }
+
+    keyboard_lighting_preset_t preview = *preset;
+    sanitize_lighting_preset(&preview);
+    apply_lighting_values(preview.mode,
+                          preview.enabled != 0,
+                          preview.brightness,
+                          preview.speed,
+                          preview.red,
+                          preview.green,
+                          preview.blue,
+                          &preview);
+}
+
+void keyboard_profile_note_pressed_keys(const int *pressed_pins, int num_pressed_pins)
+{
+    uint8_t count = 0;
+
+    if (pressed_pins != NULL && num_pressed_pins > 0) {
+        count = (uint8_t)((num_pressed_pins > 255) ? 255 : num_pressed_pins);
+    }
+
+    NeopixelNotifyPressedKeys(pressed_pins, count);
 }
 
 void keyboard_profile_set_led_enabled(bool enabled)
 {
-    s_profile.led_enabled = enabled;
+    keyboard_lighting_preset_t *preset = active_lighting_preset_mutable();
+    preset->enabled = enabled ? 1 : 0;
     keyboard_profile_apply_lighting_runtime();
     ESP_ERROR_CHECK_WITHOUT_ABORT(keyboard_profile_save_active());
 }
 
 void keyboard_profile_adjust_brightness(int delta)
 {
-    int brightness = s_profile.led_brightness + delta;
+    keyboard_lighting_preset_t *preset = active_lighting_preset_mutable();
+    int brightness = preset->brightness + delta;
     if (brightness < 0) {
         brightness = 0;
     } else if (brightness > 100) {
         brightness = 100;
     }
 
-    s_profile.led_brightness = (uint8_t)brightness;
+    preset->brightness = (uint8_t)brightness;
     keyboard_profile_apply_lighting_runtime();
     ESP_ERROR_CHECK_WITHOUT_ABORT(keyboard_profile_save_active());
 }
 
 void keyboard_profile_next_led_mode(void)
 {
-    s_profile.led_mode++;
-    if (s_profile.led_mode > YBK_LED_MODE_BLINK) {
-        s_profile.led_mode = YBK_LED_MODE_HID;
+    if (lighting_auto_cycle_enabled_for(&s_profile)) {
+        s_lighting_cycle_paused = !s_lighting_cycle_paused;
+        if (!s_lighting_cycle_paused) {
+            s_lighting_cycle_elapsed_ms = 0;
+        }
+        return;
     }
 
+    uint8_t next_preset = 0;
+    if (!find_next_enabled_lighting_preset(&next_preset)) {
+        return;
+    }
+
+    s_profile.lighting_active_preset = next_preset;
     keyboard_profile_apply_lighting_runtime();
     ESP_ERROR_CHECK_WITHOUT_ABORT(keyboard_profile_save_active());
 }

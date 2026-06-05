@@ -1,5 +1,3 @@
-DEPS_SUBMODULES += hw/mcu/sony/cxd56/spresense-exported-sdk
-
 # Platforms are: Linux, Darwin, MSYS, CYGWIN
 PLATFORM := $(firstword $(subst _, ,$(shell uname -s 2>/dev/null)))
 
@@ -37,6 +35,8 @@ CFLAGS += \
 # suppress following warnings from mcu driver
 # lwip/src/core/raw.c:334:43: error: declaration of 'recv' shadows a global declaration
 CFLAGS += -Wno-error=shadow  -Wno-error=redundant-decls
+
+LDFLAGS_GCC += -specs=nosys.specs -specs=nano.specs
 
 SPRESENSE_SDK = $(TOP)/hw/mcu/sony/cxd56/spresense-exported-sdk
 

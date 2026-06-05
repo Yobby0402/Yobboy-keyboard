@@ -1,11 +1,7 @@
 # Yobboy WebSerial Configuration Protocol
 
-This firmware exposes two USB CDC ACM ports:
-
-- CDC0: debug console, used by ESP-IDF logs/stdout.
-- CDC1: configuration channel, used by WebSerial or a desktop configurator.
-
-The GitHub Pages configurator should connect to the config CDC port. Browsers require
+This firmware exposes one USB CDC ACM port for configuration. The GitHub Pages
+configurator should connect to this CDC port. Browsers require
 HTTPS and a user click before `navigator.serial.requestPort()` can open the device.
 
 ## Frame Format
@@ -28,6 +24,9 @@ field. Use offset basis `2166136261` and prime `16777619`.
 Response frames use `type = request_type | 0x80`. Response payload starts with one
 status byte, followed by command-specific data.
 
+The device may also send async event frames on the same CDC channel. These use
+their own `type` and do not include the leading status byte.
+
 ## Commands
 
 ```text
@@ -38,6 +37,10 @@ status byte, followed by command-specific data.
 0x05 RESET_PROFILE
 0x06 PREVIEW_LED
 0x07 REBOOT
+0x08 READ_LAYOUT_META
+0x09 WRITE_LAYOUT_META
+0x0A READ_KEY_STATE
+0x70 LOG_EVENT
 ```
 
 Statuses:
@@ -94,3 +97,107 @@ keymap[layer][key_number]
 ```
 
 Layer `0` is the base layer. Layer `1` is the Fn layer.
+
+## Layout Metadata
+
+The keyboard stores only a compact layout identity, not the full KLE JSON:
+
+```text
+uint32_t magic        "YBKL" (0x4C4B4259)
+uint16_t version      1
+uint16_t size         44
+char     layout_id[32]
+uint32_t layout_hash
+```
+
+`layout_id` is a stable name such as `yobboy-80`. `layout_hash` is a 32-bit
+hash calculated by the configurator from the visual layout. The page can use
+this pair to select a matching local/KLE layout after connecting to the device.
+
+## Key State Readback
+
+`READ_KEY_STATE` returns the current physical matrix scan result from the HC165
+chain. The response payload body is:
+
+```text
+uint8_t count
+uint8_t keys[80]
+```
+
+Only the first `count` entries are valid. Key numbers are 1-based and match the
+firmware key numbering used by the profile.
+
+## Log Event
+
+When the config CDC channel is open, firmware logs can also be mirrored to the
+same port as async event frames:
+
+```text
+type = 0x70
+seq  = 0
+payload = UTF-8 log text
+```
+
+This lets the web configurator show debug logs without opening the default UART
+console.
+
+## Adding More Lighting Effects
+
+The current profile has these lighting fields:
+
+```text
+enabled
+mode
+brightness
+effect_speed
+color_r
+color_g
+color_b
+```
+
+Current built-in modes:
+
+```text
+0 HID
+1 SOLID
+2 BLINK
+3 RAINBOW
+4 WAVE
+```
+
+`PREVIEW_LED` now uses this payload:
+
+```text
+uint8_t mode
+uint8_t enabled
+uint8_t brightness
+uint8_t speed
+uint8_t red
+uint8_t green
+uint8_t blue
+```
+
+The frontend sends the selected `mode`, `speed`, and color values, and the
+firmware maps them to a runtime LED effect.
+
+For effects that need more parameters, use a versioned payload or a new command,
+for example:
+
+```text
+0x0A PREVIEW_LED_EFFECT_V2
+
+uint8_t  effect_id
+uint8_t  enabled
+uint8_t  brightness
+uint8_t  speed
+uint8_t  color1_r
+uint8_t  color1_g
+uint8_t  color1_b
+uint8_t  color2_r
+uint8_t  color2_g
+uint8_t  color2_b
+uint16_t flags
+```
+
+Then either bump `YBK_PROFILE_VERSION` and extend the profile, or store extended
+LED parameters in a separate NVS blob so the keymap profile remains stable.

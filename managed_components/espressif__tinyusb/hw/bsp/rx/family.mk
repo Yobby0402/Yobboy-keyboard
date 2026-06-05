@@ -1,5 +1,3 @@
-DEPS_SUBMODULES += hw/mcu/renesas/rx
-
 # Cross Compiler for RX
 CROSS_COMPILE = rx-elf-
 
@@ -15,6 +13,8 @@ CFLAGS += \
 
 # suppress warning caused by vendor mcu driver
 CFLAGS += -Wno-error=redundant-decls
+
+LDFLAGS_GCC += -specs=nosys.specs -specs=nano.specs
 
 SRC_C += \
 	src/portable/renesas/rusb2/dcd_rusb2.c \

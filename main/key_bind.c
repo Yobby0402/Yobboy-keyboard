@@ -3,26 +3,29 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "class/hid/hid_device.h"
-#include "usb_descriptors.h"
+#include "keyboard_input.h"
+#include "keyboard_power_policy.h"
 #include "keyboard_profile.h"
+#include "keyboard_transport.h"
 #include "esp_log.h"
 
 static const char *TAG = "key_bind";
 
 static TickType_t last_led_switch_time = 0;
 static TickType_t last_volume_time = 0;
+static TickType_t last_remote_wakeup_time = 0;
+static TickType_t last_power_mode_switch_time = 0;
 
 #define LED_CONTROL_COOLDOWN_MS CONFIG_LED_SWITCH_SLEEP
 #define VOLUME_CONTROL_COOLDOWN_MS 200
+#define REMOTE_WAKEUP_COOLDOWN_MS 250
+#define POWER_MODE_SWITCH_COOLDOWN_MS 300
 
 static void send_consumer_control(uint16_t usage_code)
 {
-    uint8_t report[2] = {(uint8_t)(usage_code & 0xFF), (uint8_t)(usage_code >> 8)};
-    tud_hid_report(REPORT_ID_CONSUMER_CONTROL, report, 2);
+    keyboard_transport_send_consumer_report(usage_code);
     vTaskDelay(pdMS_TO_TICKS(50));
-
-    uint8_t empty_report[2] = {0, 0};
-    tud_hid_report(REPORT_ID_CONSUMER_CONTROL, empty_report, 2);
+    keyboard_transport_send_consumer_report(0);
 }
 
 const basic_key_mapping_t basic_key_mappings[] = {
@@ -162,7 +165,7 @@ static void handle_profile_led_action(uint8_t action_type, TickType_t current_ti
         break;
     case YBK_ACTION_LED_EFFECT_NEXT:
         keyboard_profile_next_led_mode();
-        ESP_LOGI(TAG, "LED effect changed");
+        ESP_LOGI(TAG, "Lighting preset changed");
         break;
     default:
         return;
@@ -171,68 +174,60 @@ static void handle_profile_led_action(uint8_t action_type, TickType_t current_ti
     last_led_switch_time = current_time;
 }
 
-void process_key_press(int *pressed_pins, int num_pressed_pins)
+static void try_remote_wakeup(TickType_t current_time)
 {
-    if (num_pressed_pins == 0) {
-        tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, NULL);
+    if ((current_time - last_remote_wakeup_time) < pdMS_TO_TICKS(REMOTE_WAKEUP_COOLDOWN_MS)) {
         return;
     }
 
-    uint8_t keycode[MAX_PRESSED_KEYS] = {0};
-    int keycode_index = 0;
-    hid_keyboard_modifier_bm_t modifier = 0;
-    bool fn_pressed = false;
+    if (keyboard_transport_request_remote_wakeup()) {
+        ESP_LOGI(TAG, "USB remote wakeup requested");
+        last_remote_wakeup_time = current_time;
+    }
+}
+
+static void handle_power_action(uint8_t action_type, TickType_t current_time)
+{
+    if ((current_time - last_power_mode_switch_time) < pdMS_TO_TICKS(POWER_MODE_SWITCH_COOLDOWN_MS)) {
+        return;
+    }
+
+    if (action_type != YBK_ACTION_POWER_MODE_NEXT) {
+        return;
+    }
+
+    if (!keyboard_power_policy_cycle_mode()) {
+        ESP_LOGI(TAG, "Power mode cycle ignored (disabled by profile)");
+        return;
+    }
+
+    last_power_mode_switch_time = current_time;
+}
+
+void process_key_press(int *pressed_pins, int num_pressed_pins)
+{
+    keyboard_profile_note_pressed_keys(pressed_pins, num_pressed_pins);
+
+    if (num_pressed_pins == 0) {
+        keyboard_transport_send_keyboard_report(0, NULL);
+        return;
+    }
+
     TickType_t current_time = xTaskGetTickCount();
+    keyboard_input_report_t report = {0};
 
-    for (int i = 0; i < num_pressed_pins; i++) {
-        const keyboard_action_t *action =
-            keyboard_profile_get_action(YBK_LAYER_BASE, (uint8_t)pressed_pins[i]);
-        if (action->type == YBK_ACTION_LAYER_FN) {
-            fn_pressed = true;
-            break;
-        }
+    try_remote_wakeup(current_time);
+    keyboard_input_build_report(pressed_pins, num_pressed_pins, &report);
+
+    for (uint8_t i = 0; i < report.consumer_count; i++) {
+        handle_profile_consumer_action(report.consumer_usages[i], current_time);
+    }
+    for (uint8_t i = 0; i < report.led_action_count; i++) {
+        handle_profile_led_action(report.led_actions[i], current_time);
+    }
+    for (uint8_t i = 0; i < report.power_action_count; i++) {
+        handle_power_action(report.power_actions[i], current_time);
     }
 
-    for (int i = 0; i < num_pressed_pins; i++) {
-        uint8_t current_pin = (uint8_t)pressed_pins[i];
-        const keyboard_action_t *base_action = keyboard_profile_get_action(YBK_LAYER_BASE, current_pin);
-        const keyboard_action_t *fn_action = keyboard_profile_get_action(YBK_LAYER_FN, current_pin);
-        const keyboard_action_t *action = base_action;
-
-        if (base_action->type == YBK_ACTION_LAYER_FN) {
-            continue;
-        }
-
-        if (fn_pressed) {
-            if (fn_action->type != YBK_ACTION_NONE) {
-                action = fn_action;
-            } else if (base_action->type != YBK_ACTION_MODIFIER) {
-                continue;
-            }
-        }
-
-        switch (action->type) {
-        case YBK_ACTION_KEY:
-            if (keycode_index < MAX_PRESSED_KEYS) {
-                keycode[keycode_index++] = (uint8_t)action->code;
-            }
-            break;
-        case YBK_ACTION_MODIFIER:
-            modifier |= (hid_keyboard_modifier_bm_t)action->code;
-            break;
-        case YBK_ACTION_CONSUMER:
-            handle_profile_consumer_action(action->code, current_time);
-            break;
-        case YBK_ACTION_LED_TOGGLE:
-        case YBK_ACTION_LED_BRIGHTNESS_UP:
-        case YBK_ACTION_LED_BRIGHTNESS_DOWN:
-        case YBK_ACTION_LED_EFFECT_NEXT:
-            handle_profile_led_action(action->type, current_time);
-            break;
-        default:
-            break;
-        }
-    }
-
-    tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, modifier, keycode);
+    keyboard_transport_send_keyboard_report(report.modifier, report.keycodes);
 }

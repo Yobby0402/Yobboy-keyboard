@@ -1,0 +1,15 @@
+["\n\n\n52\n\n\nEsc","\n\n\n51\n\n\nF1","\n\n\n50\n\n\nF2","\n\n\n49\n\n\nF3","\n\n\n44\n\n\nF4","\n\n\n43\n\n\nF5","\n\n\n42\n\n\nF6","\n\n\n41\n\n\nF7","\n\n\n36\n\n\nF8","\n\n\n35\n\n\nF9","\n\n\n34\n\n\n\n\n\nF10","\n\n\n33\n\n\nF11","\n\n\n27\n\n\nF12","\n\n\n25\nVx\n\n\n\n\nIns","\n\n\n32\nV+\n\n\n\n\nDEL"],
+["~\n`\n\n54","!\n1\n\n53\nnum1","@\n2\n\n56\nnum2","#\n3\n\n55\nnum3","$\n4\n\n46\nnum4","%\n5\n\n45\nnum5","^\n6\n\n48\nnum6","&\n7\n\n47\nnum7","*\n8\n\n38\nnum8","(\n9\n\n37\nnum9",")\n0\n\n40\nnum0","_\n-\n\n39","+\n=\n\n28\nLED","\n\n\n26\n\n\n\n\n\nFn","\n\n\n31\nV-\n\nBack"],
+[{w:1.5},"Tab\n\n\n64","Q\n\n\n63","W\n\n\n62","E\n\n\n61","R\n\n\n70","T\n\n\n69","Y\n\n\n68","U\n\n\n67","I\n\n\n74","O\n\n\n73","P\n\n\n79","{\n[\n\n78","}\n]\n\n29",{w:1.5},"|\n\\\n\n30"],
+[{w:1.75},"Caps Lock\n\n\n57","A\n\n\n58","S\n\n\n60","D\n\n\n59","F\n\n\n71","G\n\n\n72","H\n\n\n65","J\n\n\n66","K\n\n\n75","L\n\n\n76",":\n;\n\n77","\"\n'\n\n20",{w:2.25},"\n\n\n17\n\n\nEnter"],
+[{w:2.25},"\n\n\n8\n\n\nShift","Z\n\n\n7","X\n\n\n6","C\n\n\n5","V\n\n\n12","B\n\n\n11","N\n\n\n10","M\n\n\n9","<\n,\n\n16",">\n.\n\n15","?\n/\n\n19","\n\n\n18\npageup\n\n\n\n\n↑",{w:1.75},"\n\n\n24\n\n\n\n\n\nShift"],
+[{w:1.25},"\n\n\n3\n\n\nCtrl",{w:1.25},"\n\n\n2\n\n\nWin",{w:1.25},"\n\n\n1\n\n\nAlt",{w:6.25},"\n\n\n4","\n\n\n14\n\n\nAlt","\n\n\n13\n\n\nCtrl","\n\n\n21\nhome\n\n\n\n\n←","\n\n\n22\npagedn\n\n\n\n\n↓","\n\n\n23\nend\n\n\n\n\n→"]
+
+
+LED_MAP = { [65,66,67,68,69,70,71,72,73,74,75,76,77,78,79],
+            [64,63,62,61,60,59,58,57,56,55,54,53,52,51,50],
+            [36,37,38,39,40,41,42,43,44,45,46,47,48,49],
+            [35,34,33,32,31,30,29,28,27,26,25,24,23],
+            [5,6,7,8,9,10,11,12,13,14,15,16,22],
+            [4,3,2,1,17,18,19,20,21]
+        }

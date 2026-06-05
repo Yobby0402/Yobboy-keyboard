@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.20)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../../../hw/bsp/family_support.cmake)
 
@@ -27,6 +27,11 @@ target_sources(${PROJECT} PUBLIC
 target_include_directories(${PROJECT} PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   )
+
+# Add libm for GCC
+if (CMAKE_C_COMPILER_ID STREQUAL "GNU")
+  target_link_libraries(${PROJECT} PUBLIC m)
+endif()
 
 # Configure compilation flags and libraries for the example without RTOS.
 # See the corresponding function in hw/bsp/FAMILY/family.cmake for details.

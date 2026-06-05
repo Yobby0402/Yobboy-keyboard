@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "esp_err.h"
+#include "keyboard_profile.h"
 #include "tusb_cdc_acm.h"
 
 #ifdef __cplusplus
@@ -10,7 +11,7 @@ extern "C" {
 #endif
 
 #define YBK_CONFIG_MAGIC 0x314B4259u /* "YBK1" little-endian */
-#define YBK_CONFIG_PROTOCOL_VERSION 1
+#define YBK_CONFIG_PROTOCOL_VERSION 2
 
 typedef enum {
     YBK_CONFIG_CMD_GET_INFO = 0x01,
@@ -20,6 +21,12 @@ typedef enum {
     YBK_CONFIG_CMD_RESET_PROFILE = 0x05,
     YBK_CONFIG_CMD_PREVIEW_LED = 0x06,
     YBK_CONFIG_CMD_REBOOT = 0x07,
+    YBK_CONFIG_CMD_READ_LAYOUT_META = 0x08,
+    YBK_CONFIG_CMD_WRITE_LAYOUT_META = 0x09,
+    YBK_CONFIG_CMD_READ_KEY_STATE = 0x0A,
+    YBK_CONFIG_CMD_READ_RUNTIME_STATE = 0x0B,
+    YBK_CONFIG_CMD_PREVIEW_LIGHTING_PRESET = 0x0C,
+    YBK_CONFIG_EVT_LOG = 0x70,
 } ybk_config_command_t;
 
 typedef enum {
@@ -53,10 +60,24 @@ typedef struct {
     uint8_t mode;
     uint8_t enabled;
     uint8_t brightness;
+    uint8_t speed;
     uint8_t red;
     uint8_t green;
     uint8_t blue;
 } __attribute__((packed)) ybk_config_led_preview_t;
+
+typedef struct {
+    uint8_t count;
+    uint8_t keys[YBK_MAX_KEYS];
+} __attribute__((packed)) ybk_config_key_state_t;
+
+typedef struct {
+    uint8_t current_mode;
+    uint8_t idle_low_scan_active;
+    uint8_t lighting_paused;
+    uint8_t active_scan_interval_ms;
+    uint32_t idle_ms;
+} __attribute__((packed)) ybk_config_runtime_state_t;
 
 esp_err_t config_protocol_start(tinyusb_cdcacm_itf_t cdc_itf);
 

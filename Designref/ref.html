@@ -1,0 +1,621 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Yobboy Configurator | ESP32-S3</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Space+Grotesk:wght@600;700&amp;family=Geist:wght@400;500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface": "#111317",
+                        "secondary": "#ffffff",
+                        "outline-variant": "#3b494b",
+                        "primary-fixed": "#7df4ff",
+                        "secondary-container": "#a9f900",
+                        "on-tertiary": "#412d00",
+                        "on-tertiary-fixed-variant": "#5e4200",
+                        "on-tertiary-container": "#7d5800",
+                        "on-surface-variant": "#b9cacb",
+                        "on-primary-fixed-variant": "#004f54",
+                        "surface-tint": "#00dbe9",
+                        "secondary-fixed-dim": "#94db00",
+                        "surface-container-highest": "#333539",
+                        "surface-container": "#1e2024",
+                        "surface-container-high": "#282a2e",
+                        "on-error": "#690005",
+                        "primary-container": "#00f0ff",
+                        "surface-dim": "#111317",
+                        "tertiary-fixed": "#ffdea8",
+                        "surface-variant": "#333539",
+                        "background": "#111317",
+                        "on-secondary-fixed": "#121f00",
+                        "error-container": "#93000a",
+                        "tertiary": "#fff4e8",
+                        "on-error-container": "#ffdad6",
+                        "inverse-primary": "#006970",
+                        "on-secondary-container": "#496f00",
+                        "inverse-on-surface": "#2f3035",
+                        "on-primary-fixed": "#002022",
+                        "on-background": "#e2e2e8",
+                        "primary": "#dbfcff",
+                        "surface-container-lowest": "#0c0e12",
+                        "tertiary-fixed-dim": "#ffba20",
+                        "error": "#ffb4ab",
+                        "on-surface": "#e2e2e8",
+                        "on-secondary": "#223600",
+                        "outline": "#849495",
+                        "primary-fixed-dim": "#00dbe9",
+                        "tertiary-container": "#ffd386",
+                        "secondary-fixed": "#a9f900",
+                        "on-primary": "#00363a",
+                        "inverse-surface": "#e2e2e8",
+                        "surface-container-low": "#1a1c20",
+                        "on-secondary-fixed-variant": "#334f00",
+                        "on-primary-container": "#006970",
+                        "surface-bright": "#37393e",
+                        "on-tertiary-fixed": "#271900"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "lg": "24px",
+                        "gutter": "12px",
+                        "xl": "40px",
+                        "sidebar-width": "280px",
+                        "sm": "8px",
+                        "unit": "4px",
+                        "xs": "4px",
+                        "md": "16px"
+                    },
+                    "fontFamily": {
+                        "display-sm": ["Space Grotesk"],
+                        "label-mono-bold": ["JetBrains Mono"],
+                        "display-lg": ["Space Grotesk"],
+                        "label-mono": ["JetBrains Mono"],
+                        "body-md": ["Geist"],
+                        "body-sm": ["Geist"]
+                    },
+                    "fontSize": {
+                        "display-sm": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                        "label-mono-bold": ["11px", {"lineHeight": "16px", "fontWeight": "700"}],
+                        "display-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "label-mono": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-sm": ["12px", {"lineHeight": "18px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .key-selected {
+            box-shadow: 0 0 12px rgba(125, 244, 255, 0.6);
+            border-color: #7df4ff !important;
+            background-color: #1e2024 !important;
+            color: #7df4ff !important;
+        }
+        .status-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3b494b; border-radius: 2px; }
+        .grid-keyboard {
+            display: grid;
+            grid-template-columns: repeat(20, minmax(36px, 1fr));
+            gap: 2px;
+            transform: scale(0.9);
+            transform-origin: top center;
+        }
+        .action-content { display: none; }
+        .action-content.active { display: block; }
+    </style>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .key-selected {
+            box-shadow: 0 0 12px rgba(125, 244, 255, 0.6);
+            border-color: #7df4ff !important;
+            background-color: #1e2024 !important;
+            color: #7df4ff !important;
+        }
+        .status-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3b494b; border-radius: 2px; }
+        .grid-keyboard {
+            display: grid;
+            grid-template-columns: repeat(20, minmax(36px, 1fr));
+            gap: 2px;
+            transform: scale(0.9);
+            transform-origin: top center;
+        }
+        .action-content { display: none; }
+        .action-content.active { display: block; }
+    </style></head>
+<body class="bg-background text-on-surface font-body-md selection:bg-primary-fixed selection:text-on-primary-fixed overflow-hidden flex flex-col h-screen">
+<!-- TopNavBar -->
+<header class="bg-surface-container border-b border-outline-variant flex justify-between items-center px-md w-full h-16 shrink-0 z-50">
+<div class="flex items-center gap-md">
+<h1 class="font-display-sm text-display-sm font-bold text-primary-fixed tracking-tight">Yobboy Configurator</h1>
+<div class="h-6 w-px bg-outline-variant mx-sm"></div>
+<div class="flex items-center gap-xs">
+<button class="font-label-mono text-label-mono text-on-surface-variant hover:bg-surface-bright transition-colors px-sm py-unit rounded" id="btn-import" title="导入 (Import)">Import</button>
+<button class="font-label-mono text-label-mono text-on-surface-variant hover:bg-surface-bright transition-colors px-sm py-unit rounded" id="btn-export" title="导出 (Export)">Export</button><div class="h-4 w-px bg-outline-variant mx-xs"></div><button class="font-label-mono text-label-mono text-on-surface-variant hover:bg-surface-bright transition-colors px-sm py-unit rounded flex items-center gap-xs" id="btn-lang-toggle"><span class="material-symbols-outlined text-[14px]">language</span> CN/EN</button>
+</div>
+</div>
+<!-- Status Notification -->
+<div class="flex items-center gap-sm bg-surface-container-lowest px-md py-xs rounded-full border border-outline-variant" id="status-toast">
+<span class="w-2 h-2 bg-secondary-container rounded-full status-pulse" id="status-indicator"></span>
+<span class="font-label-mono text-label-mono text-on-surface" id="status-text">CONNECTED: ESP32-S3</span>
+</div>
+<div class="flex items-center gap-sm">
+<div class="flex items-center gap-unit bg-surface-container-low p-unit rounded border border-outline-variant mr-sm">
+<button class="bg-surface-bright text-on-surface font-label-mono-bold text-label-mono-bold px-md py-sm rounded-sm hover:opacity-80 transition-all active:scale-95 flex items-center gap-xs" id="btn-read">
+<span class="material-symbols-outlined text-[16px]">download</span> Read
+            </button>
+<button class="bg-surface-bright text-on-surface font-label-mono-bold text-label-mono-bold px-md py-sm rounded-sm hover:opacity-80 transition-all active:scale-95 flex items-center gap-xs" id="btn-save">
+<span class="material-symbols-outlined text-[16px]">save</span> Save
+            </button>
+</div>
+<button class="bg-surface-bright text-on-surface font-label-mono-bold text-label-mono-bold px-md py-sm rounded border border-outline hover:opacity-80 transition-all active:scale-95" id="btn-reboot">Reboot</button>
+<button class="bg-error-container text-on-error-container font-label-mono-bold text-label-mono-bold px-lg py-sm rounded hover:opacity-90 transition-all active:scale-95" id="btn-connect">Connect</button>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- SideNavBar (Left) -->
+<aside class="bg-surface-container-low border-r border-outline-variant flex flex-col h-full w-sidebar-width shrink-0">
+<div class="p-md space-y-gutter">
+<!-- Device Info Card -->
+<div class="bg-surface-container-high rounded-lg p-md border border-outline-variant">
+<div class="flex items-center gap-sm mb-md">
+<span class="material-symbols-outlined text-secondary-fixed" data-icon="settings_input_component">settings_input_component</span>
+<div>
+<p class="font-label-mono-bold text-label-mono-bold text-secondary-fixed">ESP32-S3</p>
+<p class="font-label-mono text-[9px] uppercase tracking-widest text-on-surface-variant">Protocol v2.4</p>
+</div>
+</div>
+<div class="space-y-unit border-t border-outline-variant pt-sm mt-sm">
+<div class="flex justify-between">
+<span class="font-label-mono text-label-mono text-on-surface-variant uppercase">Firmware</span>
+<span class="font-label-mono text-label-mono text-on-surface">v1.0.4-BETA</span>
+</div>
+<div class="flex justify-between">
+<span class="font-label-mono text-label-mono text-on-surface-variant uppercase">Keys</span>
+<span class="font-label-mono text-label-mono text-on-surface">80 Total</span>
+</div>
+<div class="flex justify-between">
+<span class="font-label-mono text-label-mono text-on-surface-variant uppercase">Layers</span>
+<span class="font-label-mono text-label-mono text-on-surface">4 (0-3)</span>
+</div>
+</div>
+</div>
+<!-- Warning Banner (Dynamic) -->
+<div class="bg-tertiary-container text-on-tertiary-container p-sm rounded border border-tertiary-fixed-dim flex gap-sm items-start hidden" id="unsaved-warning">
+<span class="material-symbols-outlined text-[18px]" data-icon="warning">warning</span>
+<p class="font-label-mono text-label-mono font-bold leading-tight">UNSAVED CHANGES: Configuration mismatch.</p>
+</div>
+<!-- Nav Tabs -->
+<nav class="space-y-unit">
+<button class="w-full flex items-center gap-md px-md py-sm bg-secondary-container text-on-secondary-container rounded-lg font-label-mono text-label-mono transition-all">
+<span class="material-symbols-outlined" data-icon="settings_input_component">settings_input_component</span>
+                    Device Info
+                </button>
+<button class="w-full flex items-center gap-md px-md py-sm text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-all rounded font-label-mono text-label-mono">
+<span class="material-symbols-outlined" data-icon="lightbulb">lightbulb</span>
+                    Lighting
+                </button>
+<button class="w-full flex items-center gap-md px-md py-sm text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-all rounded font-label-mono text-label-mono">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+                    History
+                </button>
+<button class="w-full flex items-center gap-md px-md py-sm text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-all rounded font-label-mono text-label-mono">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+                    Settings
+                </button>
+</nav>
+</div>
+<div class="mt-auto p-md border-t border-outline-variant">
+<p class="font-label-mono text-[9px] text-on-surface-variant mb-xs">DEBUG CONSOLE</p>
+<div class="bg-surface-container-lowest border border-outline-variant p-sm rounded font-label-mono text-[9px] text-primary-fixed h-24 overflow-y-auto" id="console-mini">
+<div class="opacity-50">[INFO] Ready.</div>
+<div class="">[DEBUG] Voltage: 3.32V</div><div class="">[DEBUG] Voltage: 3.32V</div><div class="">[INFO] Temp: 32°C</div><div class="">[INFO] Temp: 32°C</div><div class="">[DEBUG] Heartbeat: OK</div></div>
+</div>
+</aside>
+<!-- Main Canvas Area -->
+<main class="flex-1 overflow-auto bg-surface relative flex flex-col items-center p-xl">
+<!-- Keyboard Visualization Stage -->
+<div class="w-full max-w-5xl bg-surface-container-low border border-outline-variant p-lg rounded-xl shadow-2xl">
+<div class="flex items-center justify-between mb-lg">
+<div class="flex items-center gap-md">
+<span class="font-label-mono text-label-mono text-on-surface-variant">LAYOUT: 80 KEY TENKEYLESS</span>
+<div class="w-2 h-2 rounded-full bg-tertiary hidden" id="unsaved-dot" title="Unsaved Changes"></div>
+</div>
+<div class="flex gap-unit">
+<span class="w-2 h-2 rounded-full bg-primary-fixed"></span>
+<span class="w-2 h-2 rounded-full bg-outline-variant"></span>
+<span class="w-2 h-2 rounded-full bg-outline-variant"></span>
+</div>
+</div>
+<div class="grid-keyboard" id="keyboard-canvas">
+<!-- Keys will be enhanced with current binding text -->
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 0)">
+<span class="text-[9px] opacity-50">0</span><span class="text-label-mono text-[10px]">ESC</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 1)">
+<span class="text-[9px] opacity-50">1</span><span class="text-label-mono text-[10px]">F1</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 2)">
+<span class="text-[9px] opacity-50">2</span><span class="text-label-mono text-[10px]">F2</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 3)">
+<span class="text-[9px] opacity-50">3</span><span class="text-label-mono text-[10px]">F3</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 4)">
+<span class="text-[9px] opacity-50">4</span><span class="text-label-mono text-[10px]">F4</span>
+</div>
+<div class="col-span-1 !h-10"></div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 5)">
+<span class="text-[9px] opacity-50">5</span><span class="text-label-mono text-[10px]">F5</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 6)">
+<span class="text-[9px] opacity-50">6</span><span class="text-label-mono text-[10px]">F6</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 7)">
+<span class="text-[9px] opacity-50">7</span><span class="text-label-mono text-[10px]">F7</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 8)">
+<span class="text-[9px] opacity-50">8</span><span class="text-label-mono text-[10px]">F8</span>
+</div>
+<div class="col-span-1 !h-10"></div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 9)">
+<span class="text-[9px] opacity-50">9</span><span class="text-label-mono text-[10px]">F9</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 10)">
+<span class="text-[9px] opacity-50">10</span><span class="text-label-mono text-[10px]">F10</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 11)">
+<span class="text-[9px] opacity-50">11</span><span class="text-label-mono text-[10px]">F11</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 12)">
+<span class="text-[9px] opacity-50">12</span><span class="text-label-mono text-[10px]">F12</span>
+</div>
+<!-- Row 2 -->
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 13)">
+<span class="text-[9px] opacity-50">13</span><span class="text-label-mono text-[10px]">~</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 14)">
+<span class="text-[9px] opacity-50">14</span><span class="text-label-mono text-[10px]">1</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 15)">
+<span class="text-[9px] opacity-50">15</span><span class="text-label-mono text-[10px]">2</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container-high hover:border-primary-fixed cursor-pointer key-selected !h-10" onclick="selectKey(this, 16)">
+<span class="text-[9px] opacity-50">16</span><span class="text-label-mono text-[10px]">3</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 17)">
+<span class="text-[9px] opacity-50">17</span><span class="text-label-mono text-[10px]">4</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 18)">
+<span class="text-[9px] opacity-50">18</span><span class="text-label-mono text-[10px]">5</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 19)">
+<span class="text-[9px] opacity-50">19</span><span class="text-label-mono text-[10px]">6</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 20)">
+<span class="text-[9px] opacity-50">20</span><span class="text-label-mono text-[10px]">7</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 21)">
+<span class="text-[9px] opacity-50">21</span><span class="text-label-mono text-[10px]">8</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 22)">
+<span class="text-[9px] opacity-50">22</span><span class="text-label-mono text-[10px]">9</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 23)">
+<span class="text-[9px] opacity-50">23</span><span class="text-label-mono text-[10px]">0</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 24)">
+<span class="text-[9px] opacity-50">24</span><span class="text-label-mono text-[10px]">-</span>
+</div>
+<div class="h-12 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 25)">
+<span class="text-[9px] opacity-50">25</span><span class="text-label-mono text-[10px]">=</span>
+</div>
+<div class="h-12 col-span-2 border border-outline-variant rounded flex flex-col items-center justify-center font-label-mono bg-surface-container-high hover:border-primary-fixed cursor-pointer transition-all active:scale-95 !h-10" onclick="selectKey(this, 26)">
+<span class="text-[9px] opacity-50">26</span><span class="text-label-mono text-[10px]">BKSP</span>
+</div>
+</div>
+<!-- Layer Switcher -->
+<div class="mt-xl flex items-center justify-center">
+<div class="flex bg-surface-container-lowest rounded overflow-hidden border border-outline-variant p-unit">
+<button class="px-xl py-sm bg-secondary-container text-on-secondary-container font-label-mono-bold text-label-mono-bold transition-colors rounded-sm" onclick="setLayer(0)">BASE</button>
+<button class="px-xl py-sm text-on-surface-variant hover:bg-surface-container-highest transition-colors font-label-mono-bold text-label-mono-bold" onclick="setLayer(1)">FN 1</button>
+<button class="px-xl py-sm text-on-surface-variant hover:bg-surface-container-highest transition-colors font-label-mono-bold text-label-mono-bold" onclick="setLayer(2)">FN 2</button>
+<button class="px-xl py-sm text-on-surface-variant hover:bg-surface-container-highest transition-colors font-label-mono-bold text-label-mono-bold" onclick="setLayer(3)">FN 3</button>
+</div>
+</div>
+</div>
+<!-- Context Hint -->
+<div class="mt-lg flex gap-md">
+<div class="flex items-center gap-sm text-[10px] font-label-mono text-on-surface-variant">
+<span class="px-unit py-px bg-surface-container-highest rounded border border-outline-variant">LMB</span>
+                SELECT KEY
+            </div>
+<div class="flex items-center gap-sm text-[10px] font-label-mono text-on-surface-variant">
+<span class="px-unit py-px bg-surface-container-highest rounded border border-outline-variant">SHIFT + LMB</span>
+                MULTI-SELECT
+            </div>
+<div class="flex items-center gap-sm text-[10px] font-label-mono text-on-surface-variant">
+<span class="px-unit py-px bg-surface-container-highest rounded border border-outline-variant">RMB</span>
+                QUICK REBIND
+            </div>
+</div>
+</main>
+<!-- Right Sidebar -->
+<aside class="w-sidebar-width bg-surface-container-low border-l border-outline-variant overflow-y-auto shrink-0 flex flex-col">
+<!-- Key Property Panel -->
+<section class="p-md border-b border-outline-variant">
+<div class="flex items-center justify-between mb-md">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary-fixed" data-icon="edit">edit</span>
+<h2 class="font-label-mono-bold text-label-mono-bold text-on-surface">KEY PROPERTIES</h2>
+</div>
+<div class="text-[9px] font-label-mono text-on-surface-variant flex flex-col items-end">
+<span class="">KEY: <span id="display-key-id" class="">16</span></span>
+<span class="">LAYER: <span id="display-layer-id" class="">0</span></span>
+</div>
+</div>
+<div class="space-y-md">
+<div class="space-y-xs">
+<label class="font-label-mono text-[10px] text-on-surface-variant">ACTION TYPE</label>
+<select class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface rounded p-sm font-label-mono text-label-mono outline-none focus:border-primary-fixed" id="action-type-select">
+<option value="keyboard">Keyboard Key</option>
+<option value="modifier">Modifier</option>
+<option value="consumer">Consumer Control</option>
+<option value="macro">Macro</option>
+<option value="fn">Fn Layer</option>
+</select>
+</div>
+<!-- Action Type Content: Keyboard -->
+<div class="action-content active space-y-md" id="action-keyboard">
+<div class="space-y-xs">
+<label class="font-label-mono text-[10px] text-on-surface-variant">KEYCODE SEARCH</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface rounded p-sm font-label-mono text-label-mono outline-none focus:border-primary-fixed pl-xl" placeholder="Search (e.g. KC_ENTER)" type="text">
+<span class="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-[18px] text-on-surface-variant" data-icon="search">search</span>
+</div>
+</div>
+</div>
+<!-- Action Type Content: Modifier -->
+<div class="action-content space-y-sm" id="action-modifier">
+<label class="font-label-mono text-[10px] text-on-surface-variant">ACTIVE MODIFIERS</label>
+<div class="grid grid-cols-2 gap-xs">
+<label class="flex items-center gap-sm cursor-pointer group bg-surface-container-lowest p-xs border border-outline-variant rounded">
+<input class="w-4 h-4 rounded border-outline-variant bg-surface-container checked:bg-primary-fixed checked:border-primary-fixed focus:ring-0" type="checkbox">
+<span class="font-label-mono text-label-mono text-on-surface-variant group-hover:text-on-surface">CTRL</span>
+</label>
+<label class="flex items-center gap-sm cursor-pointer group bg-surface-container-lowest p-xs border border-outline-variant rounded">
+<input class="w-4 h-4 rounded border-outline-variant bg-surface-container checked:bg-primary-fixed checked:border-primary-fixed focus:ring-0" type="checkbox">
+<span class="font-label-mono text-label-mono text-on-surface-variant group-hover:text-on-surface">ALT</span>
+</label>
+<label class="flex items-center gap-sm cursor-pointer group bg-surface-container-lowest p-xs border border-outline-variant rounded">
+<input class="w-4 h-4 rounded border-outline-variant bg-surface-container checked:bg-primary-fixed checked:border-primary-fixed focus:ring-0" type="checkbox">
+<span class="font-label-mono text-label-mono text-on-surface-variant group-hover:text-on-surface">SHIFT</span>
+</label>
+<label class="flex items-center gap-sm cursor-pointer group bg-surface-container-lowest p-xs border border-outline-variant rounded">
+<input class="w-4 h-4 rounded border-outline-variant bg-surface-container checked:bg-primary-fixed checked:border-primary-fixed focus:ring-0" type="checkbox">
+<span class="font-label-mono text-label-mono text-on-surface-variant group-hover:text-on-surface">GUI</span>
+</label>
+</div>
+</div>
+<!-- Action Type Content: Consumer -->
+<div class="action-content space-y-xs" id="action-consumer">
+<label class="font-label-mono text-[10px] text-on-surface-variant">CONTROL ACTION</label>
+<select class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface rounded p-sm font-label-mono text-label-mono outline-none focus:border-primary-fixed">
+<option>Volume Up</option>
+<option>Volume Down</option>
+<option>Mute</option>
+<option>Play / Pause</option>
+<option>Next Track</option>
+<option>Prev Track</option>
+</select>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-sm mt-lg">
+<button class="py-xs border border-outline-variant rounded font-label-mono text-label-mono text-error hover:bg-surface-container-highest transition-colors" id="btn-clear-key">Clear Key</button>
+<button class="py-xs border border-outline-variant rounded font-label-mono text-label-mono text-on-surface hover:bg-surface-container-highest transition-colors" id="btn-restore-default">Restore</button>
+<button class="col-span-2 py-sm bg-primary-fixed text-on-primary-fixed font-label-mono-bold text-label-mono-bold rounded-sm hover:opacity-80 transition-opacity mt-xs">Apply Binding</button>
+</div>
+</section>
+<!-- Lighting Panel -->
+<section class="p-md border-b border-outline-variant">
+<div class="flex items-center justify-between mb-md">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-secondary-fixed-dim" data-icon="palette">palette</span>
+<h2 class="font-label-mono-bold text-label-mono-bold text-on-surface">LIGHTING</h2>
+</div>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" id="led-master-toggle" type="checkbox">
+<div class="w-10 h-5 bg-surface-container-highest rounded-full peer peer-checked:after:translate-x-5 peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-secondary-container"></div>
+</label>
+</div>
+<div class="space-y-md">
+<div class="space-y-xs">
+<label class="font-label-mono text-[10px] text-on-surface-variant">EFFECT MODE</label>
+<select class="w-full bg-surface-container-lowest border border-outline-variant text-on-surface rounded p-sm font-label-mono text-label-mono outline-none">
+<option>Solid</option>
+<option>Blink</option>
+<option>Windows HID</option>
+</select>
+</div>
+<div class="space-y-xs">
+<div class="flex justify-between font-label-mono text-[10px] text-on-surface-variant">
+<label class="">BRIGHTNESS</label>
+<span id="brightness-val" class="">85%</span>
+</div>
+<input class="w-full h-1.5 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary-fixed" id="brightness-slider" type="range" value="85">
+</div>
+<div class="space-y-xs">
+<label class="font-label-mono text-[10px] text-on-surface-variant">RGB COLOR</label>
+<div class="flex gap-sm">
+<div class="w-10 h-10 rounded border border-outline-variant cursor-pointer bg-[#7df4ff]" title="Current Color"></div>
+<div class="flex-1 grid grid-cols-5 gap-unit">
+<div class="w-full h-full bg-[#ff0000] rounded-sm cursor-pointer hover:scale-110 transition-transform"></div>
+<div class="w-full h-full bg-[#00ff00] rounded-sm cursor-pointer hover:scale-110 transition-transform"></div>
+<div class="w-full h-full bg-[#0000ff] rounded-sm cursor-pointer hover:scale-110 transition-transform"></div>
+<div class="w-full h-full bg-[#ffff00] rounded-sm cursor-pointer hover:scale-110 transition-transform"></div>
+<div class="w-full h-full bg-[#ff00ff] rounded-sm cursor-pointer hover:scale-110 transition-transform"></div>
+</div>
+</div>
+</div>
+</div>
+<div class="flex flex-col gap-xs mt-lg">
+<button class="w-full py-xs border border-outline-variant rounded font-label-mono text-label-mono text-on-surface hover:bg-surface-container-highest" id="btn-preview-light">Preview Lighting</button>
+<button class="w-full py-sm bg-surface-bright border border-outline-variant rounded font-label-mono text-label-mono text-on-surface hover:bg-surface-container-highest" id="btn-save-light">Save Lighting to Config</button>
+</div>
+</section>
+<!-- Footer management -->
+<section class="p-md mt-auto bg-surface-container">
+<div class="flex items-center gap-sm mb-md opacity-50">
+<span class="material-symbols-outlined text-[18px]" data-icon="terminal">terminal</span>
+<h2 class="font-label-mono-bold text-[10px] uppercase tracking-wider">Storage</h2>
+</div>
+<div class="flex flex-col gap-sm">
+<button class="w-full py-sm bg-surface-container-highest text-on-surface font-label-mono text-label-mono border border-outline-variant hover:bg-surface-bright flex items-center justify-center gap-sm" id="btn-download-json">
+<span class="material-symbols-outlined text-[16px]">file_download</span> Download JSON
+                </button>
+</div>
+</section>
+</aside>
+</div>
+<script>
+    // State management mock
+    let currentKeyIndex = 16;
+    let currentLayer = 0;
+    let hasUnsavedChanges = false;
+
+    // UI Elements
+    const actionSelect = document.getElementById('action-type-select');
+    const warningBanner = document.getElementById('unsaved-warning');
+    const unsavedDot = document.getElementById('unsaved-dot');
+    const displayKeyId = document.getElementById('display-key-id');
+    const displayLayerId = document.getElementById('display-layer-id');
+
+    function selectKey(element, index) {
+        currentKeyIndex = index;
+        // Visual Selection
+        const allKeys = document.querySelectorAll('#keyboard-canvas > div');
+        allKeys.forEach(key => key.classList.remove('key-selected'));
+        element.classList.add('key-selected');
+        
+        // Update Panel
+        displayKeyId.innerText = index;
+        
+        // Mark as "changed" for demo purposes when interacting
+        if(!hasUnsavedChanges && index !== 16) {
+            triggerUnsaved(true);
+        }
+    }
+
+    function setLayer(layer) {
+        currentLayer = layer;
+        displayLayerId.innerText = layer;
+        
+        // Update layer buttons visual
+        const buttons = document.querySelectorAll('.mt-xl button');
+        buttons.forEach((btn, idx) => {
+            if(idx === layer) {
+                btn.classList.add('bg-secondary-container', 'text-on-secondary-container', 'rounded-sm');
+                btn.classList.remove('text-on-surface-variant');
+            } else {
+                btn.classList.remove('bg-secondary-container', 'text-on-secondary-container', 'rounded-sm');
+                btn.classList.add('text-on-surface-variant');
+            }
+        });
+    }
+
+    function triggerUnsaved(state) {
+        hasUnsavedChanges = state;
+        if(state) {
+            warningBanner.classList.remove('hidden');
+            unsavedDot.classList.remove('hidden');
+        } else {
+            warningBanner.classList.add('hidden');
+            unsavedDot.classList.add('hidden');
+        }
+    }
+
+    // Action Type Switching
+    actionSelect.addEventListener('change', (e) => {
+        const val = e.target.value;
+        document.querySelectorAll('.action-content').forEach(el => el.classList.remove('active'));
+        
+        const target = document.getElementById('action-' + val);
+        if(target) target.classList.add('active');
+        
+        triggerUnsaved(true);
+    });
+
+    // Save Button Mock
+    document.getElementById('btn-save').addEventListener('click', () => {
+        triggerUnsaved(false);
+        logToConsole("[SUCCESS] Configuration saved to device memory.");
+        updateStatus("SYNCED: ESP32-S3", "bg-secondary-container");
+    });
+
+    // Status helpers
+    function updateStatus(text, colorClass) {
+        document.getElementById('status-text').innerText = text;
+        const indicator = document.getElementById('status-indicator');
+        indicator.className = `w-2 h-2 rounded-full status-pulse ${colorClass}`;
+    }
+
+    function logToConsole(msg) {
+        const consoleEl = document.getElementById('console-mini');
+        const entry = document.createElement('div');
+        entry.innerText = msg;
+        consoleEl.appendChild(entry);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+        if(consoleEl.children.length > 20) consoleEl.removeChild(consoleEl.firstChild);
+    }
+
+    // Brightness slider display
+    document.getElementById('brightness-slider').addEventListener('input', (e) => {
+        document.getElementById('brightness-val').innerText = e.target.value + '%';
+    });
+
+    // Simulating console noise
+    setInterval(() => {
+        const logs = [
+            "[DEBUG] Heartbeat: OK",
+            "[INFO] Temp: 32°C",
+            "[DEBUG] Voltage: 3.32V",
+            "[INFO] WiFi RSSI: -65dBm"
+        ];
+        logToConsole(logs[Math.floor(Math.random() * logs.length)]);
+    }, 8000);
+</script>
+
+
+</body></html>

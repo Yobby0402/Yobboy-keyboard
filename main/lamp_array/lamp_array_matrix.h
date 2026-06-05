@@ -88,14 +88,14 @@ typedef struct {
     uint8_t autonomousMode;
 } __attribute__((packed, aligned(1))) LampArrayControlReport;
 
-#define AUTONOMOUS_LIGHTING_EFFECT  BLINK
+#define AUTONOMOUS_LIGHTING_EFFECT  BREATH
 #define AUTONOMOUS_LIGHTING_COLOR   (LampColor){0, 255, 0, 0}
 
 typedef struct {
     uint32_t lamp_array_width;
     uint32_t lamp_array_height;
     uint32_t lamp_array_depth;
-    Position *lamp_array_rotation;
+    const Position *lamp_array_rotation;
     uint32_t pixel_cnt;
     uint32_t update_interval;
     led_strip_handle_t handle;

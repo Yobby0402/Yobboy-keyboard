@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yobboy Configurator</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css?v=20260605f">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-zone">
+      <h1>Yobboy Configurator</h1>
+      <div class="divider"></div>
+      <button class="ghost" id="btn-import-kle">Import KLE</button>
+      <button class="ghost" id="btn-import-json">Import JSON</button>
+      <button class="ghost" id="btn-export-json">Export</button>
+      <button class="ghost" id="btn-help"><span class="material-symbols-outlined">help</span><span data-i18n="help">Help</span></button>
+      <button class="ghost" id="btn-lang"><span class="material-symbols-outlined">language</span><span id="lang-label">CN</span></button>
+      <input hidden id="file-json" type="file" accept="application/json,.json">
+    </div>
+    <div class="status-chip" id="status-chip">
+      <span class="status-dot" id="status-dot"></span>
+        <span id="status-text">DISCONNECTED</span>
+    </div>
+    <div class="actions">
+      <button class="secondary" id="btn-read" disabled><span class="material-symbols-outlined">download</span><span data-i18n="read">Read</span></button>
+      <button class="secondary" id="btn-save" disabled><span class="material-symbols-outlined">save</span><span data-i18n="save">Save</span></button>
+      <button class="secondary" id="btn-reboot" disabled data-i18n="reboot">Reboot</button>
+      <button class="danger" id="btn-connect" data-i18n="connect">Connect</button>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="left-panel">
+      <section class="device-card">
+        <div class="device-title">
+          <span class="material-symbols-outlined accent-green">settings_input_component</span>
+          <div>
+            <strong id="device-name">ESP32-S3</strong>
+            <small id="protocol-version">Protocol --</small>
+          </div>
+        </div>
+        <dl>
+          <div><dt data-i18n="profile">Profile</dt><dd id="profile-version">--</dd></div>
+          <div><dt data-i18n="checksum">Checksum</dt><dd id="profile-checksum">--</dd></div>
+          <div><dt data-i18n="keys">Keys</dt><dd id="profile-keys">80</dd></div>
+          <div><dt data-i18n="layers">Layers</dt><dd id="profile-layers">2</dd></div>
+        </dl>
+      </section>
+
+      <section class="warning-card hidden" id="unsaved-warning">
+        <span class="material-symbols-outlined">warning</span>
+        <strong data-i18n="unsaved">UNSAVED CHANGES</strong>
+      </section>
+
+      <section class="inspector">
+        <div class="inspector-title">
+          <div><span class="material-symbols-outlined">dashboard_customize</span><strong data-i18n="layout">LAYOUT</strong></div>
+        </div>
+        <div class="layout-source">
+          <label data-i18n="keyboardName">KEYBOARD NAME</label>
+          <input id="keyboard-name-input" type="text" maxlength="31" placeholder="My Keyboard">
+          <label data-i18n="layoutSource">LAYOUT SOURCE</label>
+          <strong id="layout-source">Local Default</strong>
+          <small id="layout-note" data-i18n="layoutNote">Device profile does not include visual layout data.</small>
+        </div>
+        <button class="secondary wide" id="btn-map-mode" data-i18n="mapMode">Key Number Map Mode</button>
+        <button class="outline wide" id="btn-default-layout" data-i18n="restoreDefaultLayout">Restore Default Layout</button>
+      </section>
+
+      <section class="console-card">
+        <label data-i18n="console">DEBUG CONSOLE</label>
+        <div id="console-mini"></div>
+      </section>
+    </aside>
+
+    <main class="workspace">
+      <section class="keyboard-stage">
+        <div class="stage-header">
+          <div>
+            <span id="layout-name">LAYOUT: YOBBOY 80 KEY</span>
+            <span class="dirty-dot hidden" id="unsaved-dot"></span>
+          </div>
+          <div class="view-controls">
+            <label><input type="checkbox" id="toggle-input-test" checked> <span data-i18n="inputTest">Input Test</span></label>
+            <label><input type="checkbox" id="toggle-device-scan"> <span data-i18n="deviceScan">Device Scan</span></label>
+            <label><input type="checkbox" id="toggle-key-number" checked> <span data-i18n="keyNumberShort">Key #</span></label>
+            <label><input type="checkbox" id="toggle-binding" checked> <span data-i18n="binding">Binding</span></label>
+          </div>
+        </div>
+        <div class="keyboard-scroll">
+          <div id="keyboard-canvas" class="keyboard-canvas"></div>
+        </div>
+        <div class="test-strip">
+          <span class="material-symbols-outlined">keyboard_command_key</span>
+          <output id="input-test-status" data-i18n="inputTestIdle">Press keys while this page is focused.</output>
+        </div>
+        <div class="layer-switch" id="layer-switch"></div>
+
+        <section class="change-card">
+          <div class="inspector-title compact">
+            <div><span class="material-symbols-outlined accent-blue">history</span><strong data-i18n="changeList">CHANGE LIST</strong></div>
+          </div>
+          <div id="change-list-empty" class="change-list-empty" data-i18n="changeListEmpty">No unsaved changes.</div>
+          <div id="change-list" class="change-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <aside class="right-panel">
+      <section class="settings-shell">
+        <div class="settings-tabs" role="tablist" aria-label="Settings">
+          <button class="settings-tab active" id="tab-keymap" data-settings-tab="keymap" role="tab" aria-selected="true" data-i18n="tabKeymap">Keymap</button>
+          <button class="settings-tab" id="tab-lighting" data-settings-tab="lighting" role="tab" aria-selected="false" data-i18n="tabLighting">Lighting</button>
+          <button class="settings-tab" id="tab-power" data-settings-tab="power" role="tab" aria-selected="false" data-i18n="tabPower">Power</button>
+        </div>
+
+        <section class="inspector settings-panel" data-settings-panel="keymap">
+        <div class="inspector-title">
+          <div><span class="material-symbols-outlined accent-blue">edit</span><strong data-i18n="keyProperties">KEY PROPERTIES</strong></div>
+          <div class="meta">
+            <span>KEY: <b id="display-key-id">--</b></span>
+            <span>LAYER: <b id="display-layer-id">0</b></span>
+          </div>
+        </div>
+
+        <label data-i18n="layerBindings">LAYER BINDINGS</label>
+        <div id="layer-binding-overview" class="layer-binding-overview"></div>
+
+        <label data-i18n="actionType">ACTION TYPE</label>
+        <select id="action-type">
+          <option value="0" data-i18n="actionNone">None</option>
+          <option value="1" data-i18n="actionKeyboard">Keyboard Key</option>
+          <option value="2" data-i18n="actionModifier">Modifier</option>
+          <option value="3" data-i18n="actionConsumer">Consumer Control</option>
+          <option value="4" data-i18n="actionFn">Fn Layer</option>
+          <option value="5" data-i18n="actionLedToggle">LED Toggle</option>
+          <option value="6" data-i18n="actionLedUp">LED Brightness Up</option>
+          <option value="7" data-i18n="actionLedDown">LED Brightness Down</option>
+          <option value="8" data-i18n="actionLedNext">LED Effect Next</option>
+          <option value="9" data-i18n="actionPowerModeNext">Power Mode Next</option>
+        </select>
+
+        <div id="keyboard-editor" class="editor-block">
+          <label data-i18n="keycodeSearch">KEYCODE SEARCH</label>
+          <input id="keycode-search" type="search" placeholder="Search, e.g. KC_ENTER">
+          <select id="keycode-select"></select>
+          <button class="outline wide" id="btn-open-key-picker" data-i18n="keyPicker">Keyboard Picker</button>
+        </div>
+
+        <div id="modifier-editor" class="editor-block hidden">
+          <label data-i18n="modifier">MODIFIER</label>
+          <div class="modifier-grid" id="modifier-grid"></div>
+        </div>
+
+        <div id="consumer-editor" class="editor-block hidden">
+          <label data-i18n="controlAction">CONTROL ACTION</label>
+          <select id="consumer-select"></select>
+        </div>
+
+        <label data-i18n="keyNumber">KEY NUMBER</label>
+        <input id="key-number-input" type="number" min="0" max="79" placeholder="Unmapped">
+
+        <div class="button-grid">
+          <button class="outline danger-text" id="btn-clear-key" data-i18n="clearKey">Clear Key</button>
+          <button class="outline" id="btn-restore-key" data-i18n="restore">Restore</button>
+          <button class="primary wide" id="btn-apply-binding" data-i18n="applyBinding">Apply Binding</button>
+        </div>
+        </section>
+
+        <section class="inspector settings-panel hidden" data-settings-panel="lighting">
+        <div class="inspector-title">
+          <div><span class="material-symbols-outlined accent-green">palette</span><strong data-i18n="lighting">LIGHTING</strong></div>
+        </div>
+        <input id="led-enabled" type="checkbox" hidden>
+        <div class="lighting-editor-layout">
+        <div class="lighting-stack-card lighting-editor-section">
+        <div class="lighting-section-head">
+          <label data-i18n="lightingPresets">LIGHTING CONFIGS</label>
+          <button class="secondary" id="btn-add-light-config" type="button" data-i18n="addLightingConfig">Add Config</button>
+        </div>
+        <div id="lighting-config-meta" class="lighting-config-meta"></div>
+        <div id="lighting-preset-list" class="lighting-preset-list"></div>
+        <div id="lighting-preset-empty" class="lighting-empty hidden" data-i18n="lightingEmpty">No lighting configs yet. Add one to start.</div>
+        </div>
+
+        <div class="lighting-stack-card lighting-editor-section lighting-editor-form">
+        <label data-i18n="selectedLightingConfig">SELECTED CONFIG</label>
+        <div id="lighting-selected-meta" class="lighting-config-meta"></div>
+        <label class="checkbox-row"><input type="checkbox" id="lighting-auto-cycle"> <span data-i18n="lightingAutoCycle">Auto Cycle</span></label>
+        <small class="preview-note" data-i18n="lightingAutoCycleHint">When enabled, the keyboard lighting-switch key pauses or resumes cycling.</small>
+        <div class="lighting-cycle-grid">
+          <div>
+            <label data-i18n="cycleInterval">CYCLE INTERVAL (S)</label>
+            <input id="lighting-cycle-interval" type="number" min="1" max="120" step="1" value="8">
+          </div>
+        </div>
+        <label data-i18n="effectMode">EFFECT MODE</label>
+        <select id="led-mode">
+          <option value="0">Windows HID</option>
+          <option value="1">Solid</option>
+          <option value="2">Breath</option>
+          <option value="3">Rainbow</option>
+          <option value="4">Wave</option>
+          <option value="5">Group Static</option>
+          <option value="6">Per-Key Static</option>
+          <option value="7">Key Fade</option>
+          <option value="8">Ripple</option>
+        </select>
+        <div class="range-row">
+          <label data-i18n="brightness">BRIGHTNESS</label>
+          <output id="brightness-output">100%</output>
+        </div>
+        <input id="brightness-slider" type="range" min="0" max="100" value="100">
+        <div class="range-row">
+          <label data-i18n="effectSpeed">EFFECT SPEED</label>
+          <output id="speed-output">50</output>
+        </div>
+        <input id="speed-slider" type="range" min="1" max="100" value="50">
+        <label data-i18n="rgbColor">RGB COLOR</label>
+        <input id="led-color" type="color" value="#ffffff">
+        <small class="preview-note" id="light-preview-note" data-i18n="lightPreviewNote">Web preview follows the current lighting values.</small>
+        <small class="preview-note" data-i18n="lightingEditHint">In Group Static or Per-Key Static, click keys in the keyboard view to edit lighting.</small>
+        <div id="lighting-static-actions" class="lighting-static-actions hidden">
+          <button class="outline wide" id="btn-static-select-all" type="button">Select All Keys</button>
+          <button class="outline wide" id="btn-static-clear-all" type="button">Clear All Keys</button>
+        </div>
+        <button class="outline wide" id="btn-preview-light" disabled data-i18n="previewLighting">Preview Lighting</button>
+        <button class="outline wide" id="btn-activate-light" disabled data-i18n="setActivePreset">Set As Current</button>
+        <button class="secondary wide" id="btn-save-light" data-i18n="saveLighting">Save Lighting to Config</button>
+        </div>
+        </div>
+        </section>
+
+        <section class="inspector settings-panel hidden" data-settings-panel="power">
+        <div class="inspector-title">
+          <div><span class="material-symbols-outlined accent-blue">bolt</span><strong data-i18n="powerModes">POWER MODES</strong></div>
+        </div>
+        <label data-i18n="powerModeDefault">DEFAULT MODE</label>
+        <select id="power-mode-default"></select>
+        <label class="checkbox-row"><input type="checkbox" id="power-mode-cycle"> <span data-i18n="powerModeCycle">Allow Key Toggle</span></label>
+
+        <div class="power-subsection">
+          <label data-i18n="socd">SOCD</label>
+          <p class="setting-description" data-i18n="socdDescription">Use SOCD when opposite directions may be held together. Example: hold A, then press D, and the output switches to D after the configured delay.</p>
+          <p class="setting-use-case" data-i18n="socdUseCase">Best for clean opposite-direction resolution while two keys are physically held.</p>
+          <label class="checkbox-row"><input type="checkbox" id="socd-enabled"> <span data-i18n="socdEnable">Enable SOCD (WASD)</span></label>
+          <div class="numeric-grid compact">
+            <div>
+              <label data-i18n="socdDelay">TRIGGER DELAY (MS)</label>
+              <input id="socd-delay-ms" type="number" min="0" max="50" step="1" value="10">
+            </div>
+          </div>
+          <label class="checkbox-row"><input type="checkbox" id="socd-randomize"> <span data-i18n="socdRandom">Randomize 1..N ms</span></label>
+        </div>
+
+        <div class="power-subsection">
+          <label data-i18n="reverseTap">REVERSE TAP ASSIST</label>
+          <p class="setting-description" data-i18n="reverseTapDescription">Use this for counter-strafe style release assist. Example: release W and the keyboard briefly taps S for the configured duration.</p>
+          <p class="setting-use-case" data-i18n="reverseTapUseCase">Best for FPS-style stop or counter-strafe behavior after releasing a movement key.</p>
+          <label class="checkbox-row"><input type="checkbox" id="reverse-tap-enabled"> <span data-i18n="reverseTapEnable">Enable Reverse Tap (WASD)</span></label>
+          <div class="numeric-grid">
+            <div>
+              <label data-i18n="reverseTapDelay">TAP DELAY (MS)</label>
+              <input id="reverse-tap-delay-ms" type="number" min="0" max="50" step="1" value="0">
+            </div>
+            <div>
+              <label data-i18n="reverseTapDuration">TAP DURATION (MS)</label>
+              <input id="reverse-tap-duration-ms" type="number" min="0" max="50" step="1" value="12">
+            </div>
+          </div>
+          <label class="checkbox-row"><input type="checkbox" id="reverse-tap-randomize"> <span data-i18n="reverseTapRandom">Randomize 1..N ms</span></label>
+        </div>
+
+        <div class="numeric-grid">
+          <div>
+            <label data-i18n="scanGame">GAME SCAN (MS)</label>
+            <input id="scan-game-ms" type="number" min="1" max="100" step="1">
+          </div>
+          <div>
+            <label data-i18n="scanOffice">OFFICE SCAN (MS)</label>
+            <input id="scan-office-ms" type="number" min="1" max="100" step="1">
+          </div>
+          <div>
+            <label data-i18n="scanSaver">SAVER SCAN (MS)</label>
+            <input id="scan-saver-ms" type="number" min="1" max="100" step="1">
+          </div>
+          <div>
+            <label data-i18n="scanIdle">IDLE SCAN (MS)</label>
+            <input id="scan-idle-ms" type="number" min="1" max="100" step="1">
+          </div>
+          <div>
+            <label data-i18n="idleLowPower">IDLE TO LOW SCAN (MS)</label>
+            <input id="idle-low-power-ms" type="number" min="0" max="60000" step="100">
+          </div>
+          <div>
+            <label data-i18n="idleDeepSleep">IDLE TO DEEP SLEEP (MS)</label>
+            <input id="idle-deep-sleep-ms" type="number" min="0" max="3600000" step="1000">
+          </div>
+        </div>
+
+        <div class="runtime-card">
+          <label data-i18n="runtimeState">RUNTIME STATE</label>
+          <div class="runtime-list">
+            <div><span data-i18n="runtimeMode">CURRENT MODE</span><strong id="runtime-mode">--</strong></div>
+            <div><span data-i18n="runtimeScan">SCAN INTERVAL</span><strong id="runtime-scan">--</strong></div>
+            <div><span data-i18n="runtimeIdle">IDLE TIME</span><strong id="runtime-idle">--</strong></div>
+            <div><span data-i18n="runtimeLighting">LIGHTING</span><strong id="runtime-lighting">--</strong></div>
+          </div>
+        </div>
+        </section>
+      </section>
+
+    </aside>
+  </div>
+
+  <dialog id="kle-dialog">
+    <form method="dialog" class="dialog-body">
+      <h2 data-i18n="importKleTitle">Import Keyboard Layout Editor</h2>
+      <textarea id="kle-input" spellcheck="false" placeholder="Paste KLE Raw Data JSON here"></textarea>
+      <div class="dialog-actions">
+        <button class="outline" value="cancel" data-i18n="cancel">Cancel</button>
+        <button class="primary" id="btn-apply-kle" value="default" data-i18n="importLayout">Import Layout</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="key-picker-dialog">
+    <form method="dialog" class="dialog-body key-picker-dialog">
+      <div class="dialog-header">
+        <h2 data-i18n="keyPickerTitle">Choose Keyboard Key</h2>
+        <button class="outline" value="cancel" data-i18n="cancel">Cancel</button>
+      </div>
+      <div id="key-picker-grid" class="key-picker-grid"></div>
+    </form>
+  </dialog>
+
+  <dialog id="help-dialog">
+    <form method="dialog" class="dialog-body help-dialog">
+      <div class="dialog-header">
+        <h2 data-i18n="helpTitle">Help</h2>
+        <button class="outline" value="cancel" data-i18n="close">Close</button>
+      </div>
+      <div class="help-content">
+        <section>
+          <h3 data-i18n="helpConnectTitle">Connect Device</h3>
+          <p data-i18n="helpConnectBody">Use Connect to open the Config CDC port, then Read to load the current profile.</p>
+        </section>
+        <section>
+          <h3 data-i18n="helpLayoutTitle">Keyboard View</h3>
+          <p data-i18n="helpLayoutBody">Key # shows the matrix number. Binding shows the current action only when a key has a real mapping.</p>
+        </section>
+        <section>
+          <h3 data-i18n="helpTabsTitle">Settings Tabs</h3>
+          <p data-i18n="helpTabsBody">Use the right-side tabs to switch between keymap, lighting, and power settings without leaving the main view.</p>
+        </section>
+        <section>
+          <h3 data-i18n="helpPowerTitle">Power Modes</h3>
+          <p data-i18n="helpPowerBody">Game, Office, and Saver define normal scan speed. Idle Scan and sleep timers are used when BLE low-power policy becomes active.</p>
+        </section>
+        <section>
+          <h3 data-i18n="helpSocdTitle">SOCD</h3>
+          <p data-i18n="helpSocdBody">SOCD only affects final HID W/A/S/D output. When an opposite direction is pressed, the new direction can wait for the configured delay before taking over.</p>
+        </section>
+        <section>
+          <h3 data-i18n="helpReverseTapTitle">Reverse Tap Assist</h3>
+          <p data-i18n="helpReverseTapBody">Reverse Tap Assist is different from SOCD. It injects a short opposite-direction tap after you release W, A, S, or D, which is useful for counter-strafe style behavior in some games.</p>
+        </section>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.js?v=20260605f"></script>
+</body>
+</html>

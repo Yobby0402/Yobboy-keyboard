@@ -1,5 +1,3 @@
-DEPS_SUBMODULES += hw/mcu/nuvoton
-
 CFLAGS += \
   -flto \
   -mthumb \
@@ -13,6 +11,8 @@ CFLAGS += \
 
 # mcu driver cause following warnings
 CFLAGS += -Wno-error=redundant-decls
+
+LDFLAGS_GCC += -specs=nosys.specs -specs=nano.specs
 
 # All source paths should be relative to the top level.
 LD_FILE = hw/bsp/$(BOARD)/nuc126_flash.ld

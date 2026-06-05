@@ -1,4 +1,4 @@
-DEPS_SUBMODULES += hw/mcu/microchip
+ASF_DIR = hw/mcu/microchip/same70
 
 CFLAGS += \
   -mthumb \
@@ -13,10 +13,18 @@ CFLAGS += \
 # suppress following warnings from mcu driver
 CFLAGS += -Wno-error=unused-parameter -Wno-error=cast-align -Wno-error=redundant-decls
 
+SPEED ?= high
+
+ifeq ($(SPEED), high)
+  CFLAGS += -DBOARD_TUD_MAX_SPEED=OPT_MODE_HIGH_SPEED
+else
+  CFLAGS += -DBOARD_TUD_MAX_SPEED=OPT_MODE_FULL_SPEED
+endif
+
 # SAM driver is flooded with -Wcast-qual which slow down complication significantly
 CFLAGS_SKIP += -Wcast-qual
 
-ASF_DIR = hw/mcu/microchip/same70
+LDFLAGS_GCC += -specs=nosys.specs -specs=nano.specs
 
 # All source paths should be relative to the top level.
 LD_FILE = $(ASF_DIR)/same70b/gcc/gcc/same70q21b_flash.ld

@@ -1,8 +1,10 @@
 set(MCU_VARIANT nrf52840)
-set(LD_FILE_GNU ${NRFX_DIR}/mdk/nrf52840_xxaa.ld)
 
 function(update_board TARGET)
-  target_compile_definitions(${TARGET} PUBLIC
-    NRF52840_XXAA
-    )
 endfunction()
+
+#board_runner_args(jlink "--device=nRF52840_xxAA" "--speed=4000")
+#include(${ZEPHYR_BASE}/boards/common/nrfjprog.board.cmake)
+#include(${ZEPHYR_BASE}/boards/common/nrfutil.board.cmake)
+#include(${ZEPHYR_BASE}/boards/common/jlink.board.cmake)
+#include(${ZEPHYR_BASE}/boards/common/openocd-nrf5.board.cmake)

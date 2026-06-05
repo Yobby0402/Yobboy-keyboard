@@ -17,7 +17,6 @@
 #include "freertos/task.h"
 #include "tinyusb.h"
 #include "tusb_cdc_acm.h"
-#include "tusb_console.h"
 #include "class/hid/hid_device.h"
 #include "driver/gpio.h"
 #include "led_strip.h"
@@ -30,6 +29,10 @@
 #include "usb_descriptors.h"
 #include "nvs_config.h"
 #include "keyboard_profile.h"
+#include "keyboard_layout_meta.h"
+#include "keyboard_power.h"
+#include "keyboard_power_policy.h"
+#include "keyboard_transport.h"
 #include "config_protocol.h"
 
 #define APP_BUTTON (GPIO_NUM_0)
@@ -63,7 +66,6 @@ const char* hid_string_descriptor[] = {
     "Yobboy Keyboard",
     "YBK001",
     "Yobboy Keyboard HID",
-    "Yobboy Debug CDC",
     "Yobboy Config CDC",
 };
 
@@ -71,30 +73,24 @@ const char* hid_string_descriptor[] = {
  * @brief Configuration descriptor
  */
 #define EPNUM_HID_IN 0x81
-#define EPNUM_CDC0_NOTIF 0x82
-#define EPNUM_CDC0_OUT 0x03
-#define EPNUM_CDC0_IN 0x83
-#define EPNUM_CDC1_NOTIF 0x84
-#define EPNUM_CDC1_OUT 0x05
-#define EPNUM_CDC1_IN 0x85
+#define EPNUM_CDC_NOTIF 0x82
+#define EPNUM_CDC_OUT 0x03
+#define EPNUM_CDC_IN 0x83
 
 enum {
     ITF_NUM_HID = 0,
-    ITF_NUM_CDC0,
-    ITF_NUM_CDC0_DATA,
-    ITF_NUM_CDC1,
-    ITF_NUM_CDC1_DATA,
+    ITF_NUM_CDC,
+    ITF_NUM_CDC_DATA,
     ITF_NUM_TOTAL,
 };
 
-#define YBK_USB_CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + (2 * TUD_CDC_DESC_LEN))
+#define YBK_USB_CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_CDC_DESC_LEN)
 
 static const uint8_t hid_configuration_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, YBK_USB_CONFIG_TOTAL_LEN,
                          TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
     TUD_HID_DESCRIPTOR(ITF_NUM_HID, 4, false, sizeof(hid_report_descriptor), EPNUM_HID_IN, 16, 10),
-    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC0, 5, EPNUM_CDC0_NOTIF, 8, EPNUM_CDC0_OUT, EPNUM_CDC0_IN, 64),
-    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC1, 6, EPNUM_CDC1_NOTIF, 8, EPNUM_CDC1_OUT, EPNUM_CDC1_IN, 64),
+    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 5, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 };
 
 /********* TinyUSB HID callbacks ***************/
@@ -103,6 +99,31 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance)
 {
     (void) instance;
     return hid_report_descriptor;
+}
+
+void tud_mount_cb(void)
+{
+    keyboard_transport_notify_usb_mount();
+    ESP_LOGI(TAG, "USB mounted");
+}
+
+void tud_umount_cb(void)
+{
+    keyboard_transport_notify_usb_unmount();
+    ESP_LOGI(TAG, "USB unmounted");
+}
+
+void tud_suspend_cb(bool remote_wakeup_en)
+{
+    keyboard_transport_notify_usb_suspend(remote_wakeup_en);
+    ESP_LOGI(TAG, "USB suspended, remote wakeup %s",
+             remote_wakeup_en ? "enabled" : "disabled");
+}
+
+void tud_resume_cb(void)
+{
+    keyboard_transport_notify_usb_resume();
+    ESP_LOGI(TAG, "USB resumed");
 }
 
 /**
@@ -183,9 +204,15 @@ void button_task(void *pvParameters)
 
     while (1) {
         int num_pressed_pins = get_pressed_pin(pressed_pins);
+        if (num_pressed_pins > 0 || keyboard_power_wake_key_pressed()) {
+            keyboard_power_note_activity();
+            keyboard_power_policy_note_activity();
+        }
         process_key_press(pressed_pins, num_pressed_pins);
-        
-        vTaskDelay(pdMS_TO_TICKS(10));
+
+        uint8_t scan_interval_ms = keyboard_power_policy_get_scan_interval_ms(
+            g_config ? g_config->scan_interval_ms : DEFAULT_SCAN_INTERVAL);
+        vTaskDelay(pdMS_TO_TICKS(scan_interval_ms));
     }
 }
 
@@ -207,9 +234,98 @@ void lamp_update_task(void *pvParameters)
     
     while (1) {
         // 定期刷新 LED（应用 Windows 设置的颜色）
-        NeopixelUpdateEffect();
+        if (keyboard_power_policy_should_update_lighting()) {
+            keyboard_profile_lighting_tick(refresh_interval_ms);
+            NeopixelUpdateEffect();
+        }
         
         vTaskDelay(pdMS_TO_TICKS(refresh_interval_ms));
+    }
+}
+
+static bool transport_allows_light_sleep(const keyboard_transport_status_t *transport)
+{
+    if (transport->ble_connected) {
+        return false;
+    }
+
+    if (!transport->usb_mounted) {
+        return true;
+    }
+
+    return transport->usb_suspended && transport->usb_remote_wakeup_enabled;
+}
+
+static bool transport_allows_deep_sleep(const keyboard_transport_status_t *transport)
+{
+    return !transport->usb_mounted && !transport->ble_connected;
+}
+
+static void prepare_leds_for_deep_sleep(void)
+{
+    if (!led_state) {
+        return;
+    }
+
+    led_state = false;
+    NeopixelUpdateEffect();
+    ESP_LOGI(TAG, "LEDs turned off before deep sleep");
+}
+
+/**
+ * @brief 电源管理策略任务
+ */
+void power_task(void *pvParameters)
+{
+    (void)pvParameters;
+
+    while (1) {
+        const keyboard_transport_status_t *transport = keyboard_transport_get_status();
+        const keyboard_power_status_t *power = keyboard_power_get_status();
+
+        keyboard_power_policy_tick(transport);
+
+        if (!power->wake_gpio_enabled || !power->wake_gpio_valid) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        if (keyboard_power_wake_key_pressed()) {
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+
+#if CONFIG_KEYBOARD_AUTO_DEEP_SLEEP_ENABLE
+        // Deep sleep only runs when both USB and BLE are fully inactive.
+        if (transport_allows_deep_sleep(transport) &&
+            keyboard_power_policy_should_enter_deep_sleep(transport)) {
+            ESP_LOGI(TAG, "Auto deep sleep triggered after %lu ms idle",
+                     (unsigned long)keyboard_power_get_idle_ms());
+            prepare_leds_for_deep_sleep();
+            keyboard_power_enter_deep_sleep();
+        }
+#endif
+
+#if CONFIG_KEYBOARD_AUTO_LIGHT_SLEEP_ENABLE
+        // Light sleep may also be used during USB suspend, so the device can
+        // wake on the dedicated key and then request USB remote wakeup.
+        if (transport_allows_light_sleep(transport) &&
+            keyboard_power_should_enter_light_sleep(false)) {
+            ESP_LOGI(TAG, "Auto light sleep triggered after %lu ms idle",
+                     (unsigned long)keyboard_power_get_idle_ms());
+            esp_err_t ret = keyboard_power_enter_light_sleep();
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Auto light sleep failed: %s", esp_err_to_name(ret));
+                keyboard_power_note_activity();
+                keyboard_power_policy_note_activity();
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            keyboard_power_policy_note_activity();
+        }
+#endif
+
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
 
@@ -258,7 +374,7 @@ static void init_led_strip(void)
 
 static void init_usb_cdc_interfaces(void)
 {
-    const tinyusb_config_cdcacm_t debug_cdc_cfg = {
+    const tinyusb_config_cdcacm_t config_cdc_cfg = {
         .usb_dev = TINYUSB_USBDEV_0,
         .cdc_port = TINYUSB_CDC_ACM_0,
         .callback_rx = NULL,
@@ -266,20 +382,8 @@ static void init_usb_cdc_interfaces(void)
         .callback_line_state_changed = NULL,
         .callback_line_coding_changed = NULL,
     };
-    ESP_ERROR_CHECK(tusb_cdc_acm_init(&debug_cdc_cfg));
-
-    const tinyusb_config_cdcacm_t config_cdc_cfg = {
-        .usb_dev = TINYUSB_USBDEV_0,
-        .cdc_port = TINYUSB_CDC_ACM_1,
-        .callback_rx = NULL,
-        .callback_rx_wanted_char = NULL,
-        .callback_line_state_changed = NULL,
-        .callback_line_coding_changed = NULL,
-    };
     ESP_ERROR_CHECK(tusb_cdc_acm_init(&config_cdc_cfg));
-
-    ESP_ERROR_CHECK(esp_tusb_init_console(TINYUSB_CDC_ACM_0));
-    ESP_ERROR_CHECK(config_protocol_start(TINYUSB_CDC_ACM_1));
+    ESP_ERROR_CHECK(config_protocol_start(TINYUSB_CDC_ACM_0));
 }
 
 /**
@@ -316,9 +420,50 @@ void app_main(void)
     led_load_config_from_nvs();
     ESP_LOGI(TAG, "Initializing keyboard runtime profile...");
     ESP_ERROR_CHECK(keyboard_profile_init());
+    ESP_ERROR_CHECK(keyboard_layout_meta_init());
+    ESP_ERROR_CHECK(keyboard_transport_init());
+    ESP_ERROR_CHECK(keyboard_power_init());
+    ESP_ERROR_CHECK(keyboard_power_policy_init());
     ESP_LOGI(TAG, "Keyboard profile checksum: 0x%08lx",
              (unsigned long)keyboard_profile_get_checksum());
     ESP_LOGI(TAG, "LED initial state: %s", led_state ? "ON" : "OFF");
+    const keyboard_power_status_t *power_status = keyboard_power_get_status();
+    const keyboard_power_profile_t *power_profile = keyboard_profile_get_power_profile();
+    const keyboard_power_policy_status_t *policy_status = keyboard_power_policy_get_status();
+    ESP_LOGI(TAG, "Power wake GPIO: %s",
+             power_status->wake_gpio_enabled ? "configured" : "disabled");
+    if (power_status->wake_gpio_enabled) {
+        ESP_LOGI(TAG, "  Wake GPIO%d active %s, valid=%s",
+                 power_status->wake_gpio,
+                 power_status->wake_active_low ? "LOW" : "HIGH",
+                 power_status->wake_gpio_valid ? "yes" : "no");
+    }
+    ESP_LOGI(TAG, "  Idle thresholds: light=%lu ms, deep=%lu ms",
+             (unsigned long)power_status->idle_light_sleep_ms,
+             (unsigned long)power_status->idle_deep_sleep_ms);
+    ESP_LOGI(TAG, "  Scan profiles: game=%u ms, office=%u ms, saver=%u ms, idle=%u ms",
+             power_profile->scan_interval_game_ms,
+             power_profile->scan_interval_office_ms,
+             power_profile->scan_interval_saver_ms,
+             power_profile->idle_scan_interval_ms);
+    ESP_LOGI(TAG, "  Power mode default=%u, idle low power=%u ms, deep sleep=%lu ms",
+             power_profile->default_mode,
+             power_profile->idle_enter_low_power_ms,
+             (unsigned long)power_profile->idle_enter_deep_sleep_ms);
+    ESP_LOGI(TAG, "  Runtime power mode=%u, scan=%u ms",
+             policy_status->current_mode,
+             policy_status->active_scan_interval_ms);
+#if CONFIG_KEYBOARD_AUTO_LIGHT_SLEEP_ENABLE
+    ESP_LOGI(TAG, "  Auto light sleep: enabled");
+#else
+    ESP_LOGI(TAG, "  Auto light sleep: disabled");
+#endif
+#if CONFIG_KEYBOARD_AUTO_DEEP_SLEEP_ENABLE
+    ESP_LOGI(TAG, "  Auto deep sleep: enabled");
+#else
+    ESP_LOGI(TAG, "  Auto deep sleep: disabled");
+#endif
+    ESP_LOGI(TAG, "  Sleep policy: light sleep allows USB suspend remote wake, deep sleep requires no active transport");
     
     // Initialize button
     const gpio_config_t boot_button_config = {
@@ -368,6 +513,7 @@ void app_main(void)
     // Create tasks
     xTaskCreate(button_task, "button_task", 4096, NULL, configMAX_PRIORITIES - 1, NULL);
     xTaskCreate(lamp_update_task, "lamp_task", 4096, NULL, configMAX_PRIORITIES - 2, NULL);
+    xTaskCreate(power_task, "power_task", 3072, NULL, configMAX_PRIORITIES - 3, NULL);
     
     // NOTE: 原有的 led_task 已被 lamp_update_task 替代
     // LED 现在由 Windows Lamp Array 控制，或者在自主模式下由 pixel.c 控制

@@ -752,4 +752,63 @@ menu "LED Configuration"
                 Lower values save faster but may reduce flash lifetime.
     endmenu
 
+    menu "Power Management Skeleton"
+        config KEYBOARD_WAKE_GPIO_ENABLE
+            bool "Enable dedicated wake GPIO input"
+            default n
+            help
+                Enable an extra GPIO input for a dedicated wake key, such as wiring
+                the space bar to a standalone MCU pin for low-power wakeup.
+
+        config KEYBOARD_WAKE_GPIO_NUM
+            int "Dedicated wake GPIO number"
+            default 1
+            range 0 48
+            depends on KEYBOARD_WAKE_GPIO_ENABLE
+            help
+                GPIO number used by the dedicated wake key input.
+
+        config KEYBOARD_WAKE_GPIO_ACTIVE_LOW
+            bool "Dedicated wake GPIO active low"
+            default y
+            depends on KEYBOARD_WAKE_GPIO_ENABLE
+            help
+                Enable this when the wake key pulls the GPIO low when pressed.
+
+        config KEYBOARD_IDLE_LIGHT_SLEEP_MS
+            int "Light sleep idle timeout (ms)"
+            default 15000
+            range 0 600000
+            help
+                Idle timeout threshold used by the automatic light sleep strategy.
+                Light sleep is only entered when a dedicated wake GPIO is configured
+                and the current transport state allows sleeping.
+
+        config KEYBOARD_IDLE_DEEP_SLEEP_MS
+            int "Deep sleep idle timeout (ms)"
+            default 300000
+            range 0 3600000
+            help
+                Idle timeout threshold used by the automatic deep sleep strategy.
+                Deep sleep should stay disabled until wake wiring and resume behavior
+                are fully verified on the target hardware.
+
+        config KEYBOARD_AUTO_LIGHT_SLEEP_ENABLE
+            bool "Enable automatic light sleep strategy"
+            default y
+            depends on KEYBOARD_WAKE_GPIO_ENABLE
+            help
+                Automatically enter light sleep after the configured idle timeout,
+                but only when BLE is disconnected and either USB is detached or
+                USB is suspended with remote wakeup enabled.
+
+        config KEYBOARD_AUTO_DEEP_SLEEP_ENABLE
+            bool "Enable automatic deep sleep strategy"
+            default n
+            depends on KEYBOARD_WAKE_GPIO_ENABLE
+            help
+                Automatically enter deep sleep after the configured deep sleep idle timeout.
+                Keep this disabled until wake wiring and resume behavior are fully verified.
+    endmenu
+
 endmenu

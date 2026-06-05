@@ -6,6 +6,12 @@ idf_component_register(
         "key_bind.c"
         "nvs_config.c"
         "keyboard_profile.c"
+        "keyboard_input.c"
+        "keyboard_transport.c"
+        "keyboard_ble_hid.c"
+        "keyboard_power.c"
+        "keyboard_power_policy.c"
+        "keyboard_layout_meta.c"
         "config_protocol.c"
         "lamp_array/lamp_array_matrix.c"
         "lamp_array/pixel.c"
@@ -14,7 +20,9 @@ idf_component_register(
         "./include"
         "./lamp_array"
     PRIV_REQUIRES
+        bt
         driver
+        esp_hid
         esp_timer
         nvs_flash
 )

@@ -26,59 +26,58 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-
-#include "bsp/board.h"
-
-//--------------------------------------------------------------------+
-// MACRO CONSTANT TYPEDEF PROTOTYPES
-//--------------------------------------------------------------------+
+#include "bsp/board_api.h"
 
 /* Blink pattern
  * - 250 ms  : button is not pressed
  * - 1000 ms : button is pressed (and hold)
  */
-enum  {
+enum {
   BLINK_PRESSED = 250,
   BLINK_UNPRESSED = 1000
 };
 
 #define HELLO_STR   "Hello from TinyUSB\r\n"
 
-int main(void)
-{
+int main(void) {
   board_init();
   board_led_write(true);
 
   uint32_t start_ms = 0;
   bool led_state = false;
 
-  while (1)
-  {
+  while (1) {
     uint32_t interval_ms = board_button_read() ? BLINK_PRESSED : BLINK_UNPRESSED;
 
-    // Blink and print every interval ms
-    if ( !(board_millis() - start_ms < interval_ms) )
-    {
-      board_uart_write(HELLO_STR, strlen(HELLO_STR));
+    int ch = board_getchar();
+    if (ch > 0) {
+      board_putchar(ch);
+      #ifndef LOGGER_UART
+      board_uart_write(&ch, 1);
+      #endif
+    }
 
+    // Blink and print every interval ms
+    if (!(board_millis() - start_ms < interval_ms)) {
       start_ms = board_millis();
+
+      if (ch < 0) {
+        // skip if echoing
+        printf(HELLO_STR);
+
+        #ifndef LOGGER_UART
+        board_uart_write(HELLO_STR, strlen(HELLO_STR));
+        #endif
+      }
 
       board_led_write(led_state);
       led_state = 1 - led_state; // toggle
     }
-
-    // echo
-    uint8_t ch;
-    if ( board_uart_read(&ch, 1) > 0 )
-    {
-      board_uart_write(&ch, 1);
-    }
   }
 }
 
-#if CFG_TUSB_MCU == OPT_MCU_ESP32S2 || CFG_TUSB_MCU == OPT_MCU_ESP32S3
-void app_main(void)
-{
+#ifdef ESP_PLATFORM
+void app_main(void) {
   main();
 }
 #endif

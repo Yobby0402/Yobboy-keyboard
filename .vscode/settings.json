@@ -4,7 +4,7 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-bridge.cfg"
   ],
-  "idf.portWin": "COM9",
+  "idf.portWin": "COM27",
   "idf.flashType": "UART",
   "tabnine.codeLensEnabled": false,
   "editor.defaultFoldingRangeProvider": "espressif.esp-idf-extension",
@@ -29,5 +29,7 @@
     "nvsdata.h": "c",
     "stdbool.h": "c",
     "stdint.h": "c"
-  }
+  },
+  "idf.customExtraVars": {},
+  "idf.currentSetup": "C:\\esp\\v5.4.3\\esp-idf"
 }

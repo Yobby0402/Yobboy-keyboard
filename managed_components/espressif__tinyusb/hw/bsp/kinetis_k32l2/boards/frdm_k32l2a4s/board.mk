@@ -3,13 +3,10 @@ MCU = K32L2A41A
 CFLAGS += -DCPU_K32L2A41VLH1A
 
 # mcu driver cause following warnings
-CFLAGS += -Wno-error=unused-parameter -Wno-error=redundant-decls -Wno-error=cast-qual
+CFLAGS_GCC += -Wno-error=unused-parameter -Wno-error=redundant-decls -Wno-error=cast-qual
 
 # All source paths should be relative to the top level.
 LD_FILE = $(MCU_DIR)/gcc/K32L2A41xxxxA_flash.ld
-
-SRC_C += \
-	$(MCU_DIR)/project_template/clock_config.c \
 
 # For flash-jlink target
 JLINK_DEVICE = K32L2A41xxxxA
