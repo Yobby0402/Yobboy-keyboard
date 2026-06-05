@@ -1,66 +1,67 @@
 # Yobboy Keyboard Firmware
 
-基于 ESP32-S3 的自定义键盘固件，包含：
+[中文说明](./README.zh-CN.md)
 
-- USB HID 键盘
-- USB CDC 调试 / 配置通道
-- WebSerial 网页配置器
-- 灯光、键位、功耗配置持久化到 NVS
-- Fn 双层映射
-- SOCD
-- 反向补键（Reverse Tap Assist）
+Open-source custom keyboard firmware for an ESP32-S3 keyboard project with:
 
-仓库里同时包含固件代码和静态网页配置器，网页可以本地运行，也可以部署到 GitHub Pages。
+- USB HID keyboard support
+- USB CDC configuration/debug channel
+- WebSerial-based browser configurator
+- Persistent keymap, lighting, and power settings in NVS
+- Fn layer editing
+- SOCD for WASD
+- Reverse Tap Assist for WASD
 
-## 当前能力
+This repository contains both the firmware and the static web configurator.
 
-### 固件
+## Highlights
 
-- ESP32-S3 USB HID 键盘
-- 组合 USB 设备（HID + CDC）
-- HC165 按键扫描
-- Windows Dynamic Lighting / Lamp Array
-- 多灯光预设、预览、切换
-- 键盘名称、布局元数据、键位映射写入 NVS
-- 功耗档位与扫描参数配置
-- SOCD（WASD）
-- 反向补键（WASD）
+### Firmware
 
-### 网页配置器
+- ESP32-S3 USB composite device
+- HID keyboard + CDC configurator channel
+- HC165 matrix scanning
+- Dynamic keymap storage in NVS
+- Multi-preset lighting configuration
+- Windows Dynamic Lighting / Lamp Array integration
+- Configurable scan/power profiles
+- WASD SOCD
+- WASD Reverse Tap Assist
 
-- WebSerial 连接键盘配置 CDC
-- 读取 / 编辑 / 保存 profile
-- 中英文切换
-- KLE 布局导入
-- 键位编辑、Fn 层编辑、键盘选键器
-- 灯光配置编辑与设备预览
-- 运行状态查看
-- 变更列表
+### Web configurator
 
-## 目录说明
+- WebSerial connection to the device CDC interface
+- Read, edit, save, and reboot from the browser
+- English / Chinese UI
+- KLE layout import
+- Base / Fn layer key editing
+- Lighting preset editor and live device preview
+- Runtime status view
+- Change list before save
+
+## Repository layout
 
 ```text
-main/                  固件主代码
-main/include/          固件头文件
-main/lamp_array/       灯光协议与灯效实现
-web-config/            静态网页配置器
-tools/serve_configurator.py
-                       本地启动网页配置器的轻量服务器
-KEYBOARD_LAYOUT.md     键盘布局说明
-DMA_NVS_CONFIG_GUIDE.md
-                       DMA / NVS 配置说明
-WEB_SERIAL_CONFIG_PROTOCOL.md
-                       配置协议说明
+main/                              Firmware source
+main/include/                      Firmware headers
+main/lamp_array/                   Lighting and Lamp Array implementation
+web-config/                        Static browser configurator
+tools/serve_configurator.py        Local server for the configurator
+KEYBOARD_LAYOUT.md                 Keyboard layout notes
+DMA_NVS_CONFIG_GUIDE.md            DMA / NVS setup notes
+WEB_SERIAL_CONFIG_PROTOCOL.md      Configurator protocol
 ```
 
-## 固件开发
+## Quick start
 
-### 环境
+### Firmware
 
-- ESP-IDF 5.4 或更新版本
-- VS Code + ESP-IDF 插件（推荐）
+Requirements:
 
-### 编译与烧录
+- ESP-IDF 5.4 or newer
+- VS Code + ESP-IDF extension recommended
+
+Build and flash:
 
 ```powershell
 idf.py build
@@ -68,137 +69,109 @@ idf.py -p COM3 flash
 idf.py -p COM3 monitor
 ```
 
-如果硬件上保留了 `BOOT` 和 `RST`，需要时可手动进入下载模式再烧录。
+If your board exposes `BOOT` and `RST`, you can enter download mode manually when needed.
 
-## 本地运行网页配置器
+### Local web configurator
 
-配置器是纯静态页面，不依赖前端构建工具。
+The configurator is a static site. No frontend build step is required.
 
 ```powershell
 python tools/serve_configurator.py
 ```
 
-默认会在本机启动一个 `http://127.0.0.1:8765/` 页面。
+Then open:
 
-建议使用支持 WebSerial 的浏览器：
+```text
+http://127.0.0.1:8765/
+```
+
+Recommended browsers:
 
 - Microsoft Edge
 - Google Chrome
 
-## 网页配置器使用说明
+## Using the configurator
 
-### 连接方式
+1. Connect the keyboard over USB
+2. Open the configurator page
+3. Click `Connect`
+4. Select the configuration CDC port
+5. Click `Read` to load the current profile
+6. Edit keymap / lighting / power settings
+7. Click `Save` to write the profile to NVS
 
-1. 将键盘通过 USB 连接电脑
-2. 打开网页配置器
-3. 点击“连接”
-4. 选择键盘暴露出来的配置 CDC 端口
-5. 点击“读取”加载当前配置
+Settings persist after reboot.
 
-### 数据保存
+## SOCD and Reverse Tap Assist
 
-- 网页侧修改后点击“保存”
-- 配置写入设备 NVS
-- 键盘重启后仍然保留
+Both features currently apply only to `W`, `A`, `S`, and `D`.
 
-### 关于 SOCD 和反向补键
+### SOCD
 
-这两个功能现在都只针对 `W/A/S/D` 生效。
+SOCD resolves opposite-direction conflicts when both keys are physically pressed.
 
-#### SOCD
+Example:
 
-SOCD 用于处理“相反方向同时按下”时的输出冲突。
+- hold `A`
+- then press `D`
+- output switches according to the configured delay and rule
 
-例子：
+Use SOCD when you want clean handling of simultaneous opposite inputs.
 
-- 按住 `A`
-- 再按 `D`
-- 键盘会按设置的延时后切到 `D`
+### Reverse Tap Assist
 
-适合需要稳定处理对冲输入的场景。
+Reverse Tap Assist injects a short opposite-direction tap after you release a movement key.
 
-#### 反向补键
+Example:
 
-反向补键用于“松开方向键后自动补一个反方向短按”。
+- hold `W`
+- release `W`
+- wait for the configured delay
+- briefly tap `S` for the configured duration
 
-例子：
+Current configurable parameters:
 
-- 按住 `W`
-- 松开 `W`
-- 等待设定延时
-- 自动短按一次 `S`
+- enable / disable
+- tap delay
+- tap duration
+- randomized timing
 
-现在支持三个参数：
+Use this for counter-strafe or quick-stop style behavior.
 
-- 是否启用
-- 补键延迟
-- 补键时长
-- 随机模式（对延迟和时长都生效）
+## GitHub Pages deployment
 
-适合 FPS 场景下的急停 / counter-strafe 需求。
+The browser configurator lives in `web-config/` and can be deployed directly to GitHub Pages.
 
-## GitHub Pages 部署
-
-网页配置器位于 `web-config/`，已经可以作为静态站点发布到 GitHub Pages。
-
-仓库里已加入 GitHub Actions 工作流：
+This repository includes a Pages workflow:
 
 - `.github/workflows/deploy-pages.yml`
 
-它会在推送到 `master` 或 `main` 时，自动把 `web-config/` 发布到 GitHub Pages。
+It publishes `web-config/` automatically when you push to `master` or `main`.
 
-### 首次部署步骤
+### First-time setup
 
-1. 把仓库推送到 GitHub
-2. 打开 GitHub 仓库页面
-3. 进入 `Settings -> Pages`
-4. 在 `Build and deployment` 里把 `Source` 设为 `GitHub Actions`
-5. 回到仓库首页，推送一次包含工作流的提交
-6. 等待 `Actions` 里的 `Deploy Configurator to GitHub Pages` 跑完
+1. Push the repository to GitHub
+2. Open `Settings -> Pages`
+3. Set `Source` to `GitHub Actions`
+4. Push a commit that includes the workflow
+5. Wait for `Deploy Configurator to GitHub Pages` in the `Actions` tab
 
-部署成功后，页面地址通常是：
-
-```text
-https://<你的用户名>.github.io/Yobboy-keyboard/
-```
-
-如果仓库名发生变化，末尾路径也会跟着变化。
-
-### 注意事项
-
-- GitHub Pages 是 HTTPS，适合 WebSerial 使用
-- 如果是公司电脑或受限浏览器策略，WebSerial 可能被禁用
-- 网页配置器负责“配置”和“预览”，不负责固件烧录
-- 固件烧录仍建议通过 ESP-IDF / esptool，并在需要时手动按 `BOOT` / `RST`
-
-## 推荐工作流
-
-### 固件开发
+Expected site URL:
 
 ```text
-修改固件 -> 编译 -> 烧录 -> 用网页配置器验证
+https://<your-username>.github.io/Yobboy-keyboard/
 ```
 
-### 配置器开发
+## Notes
 
-```text
-修改 web-config/ -> 本地运行 tools/serve_configurator.py -> 浏览器验证
-```
+- GitHub Pages uses HTTPS, which works well with WebSerial
+- The browser configurator is for configuration and preview, not firmware flashing
+- Firmware flashing is still expected to go through ESP-IDF / esptool
+- If your worktree contains large unrelated changes, review them before pushing
 
-### 发布配置器
+## Related documents
 
-```text
-提交 web-config/ 和 .github/workflows/deploy-pages.yml
--> 推送到 GitHub
--> GitHub Actions 自动部署到 Pages
-```
-
-## 相关文档
-
-- [KEYBOARD_LAYOUT.md](KEYBOARD_LAYOUT.md)
-- [DMA_NVS_CONFIG_GUIDE.md](DMA_NVS_CONFIG_GUIDE.md)
-- [WEB_SERIAL_CONFIG_PROTOCOL.md](WEB_SERIAL_CONFIG_PROTOCOL.md)
-
-## 备注
-
-当前仓库里如果存在大量 `managed_components/` 变更，建议先确认这些改动是否需要一并提交；如果只是依赖同步噪音，最好单独清理后再推送，避免把无关内容带上去。
+- [Chinese README](./README.zh-CN.md)
+- [Keyboard layout notes](./KEYBOARD_LAYOUT.md)
+- [DMA / NVS guide](./DMA_NVS_CONFIG_GUIDE.md)
+- [WebSerial protocol](./WEB_SERIAL_CONFIG_PROTOCOL.md)
