@@ -10,6 +10,8 @@ extern "C" {
 #endif
 
 #define KEYBOARD_INPUT_MAX_KEYS 6
+#define KEYBOARD_INPUT_NKRO_USAGE_MAX 0xA4
+#define KEYBOARD_INPUT_NKRO_BYTES (((KEYBOARD_INPUT_NKRO_USAGE_MAX) + 8) / 8)
 #define KEYBOARD_INPUT_MAX_CONSUMERS 8
 #define KEYBOARD_INPUT_MAX_LED_ACTIONS 8
 #define KEYBOARD_INPUT_MAX_POWER_ACTIONS 4
@@ -18,6 +20,7 @@ typedef struct {
     hid_keyboard_modifier_bm_t modifier;
     uint8_t keycodes[KEYBOARD_INPUT_MAX_KEYS];
     uint8_t keycode_count;
+    uint8_t nkro_keys[KEYBOARD_INPUT_NKRO_BYTES];
     bool fn_pressed;
     uint16_t consumer_usages[KEYBOARD_INPUT_MAX_CONSUMERS];
     uint8_t consumer_count;

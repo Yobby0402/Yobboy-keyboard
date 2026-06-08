@@ -9,9 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "sdkconfig.h"
+#include "keyboard_lighting_topology.h"
 #include "pixel.h"
 #include "esp_log.h"
-#include "lightmap.h"
 
 extern bool led_state;
 
@@ -128,7 +128,9 @@ static void blend_max_color(LampColor *dst, LampColor src)
 
 static uint32_t mapped_lamp_count(void)
 {
-    return Controller.pixel_cnt < 80u ? Controller.pixel_cnt : 80u;
+    uint32_t topology_count = keyboard_lighting_topology_get_led_count();
+    uint32_t limit = Controller.pixel_cnt < topology_count ? Controller.pixel_cnt : topology_count;
+    return limit < YBK_LIGHTING_MAX_LAMPS ? limit : YBK_LIGHTING_MAX_LAMPS;
 }
 
 static void trigger_reactive_fade_for_key(uint8_t key_num)
@@ -139,7 +141,7 @@ static void trigger_reactive_fade_for_key(uint8_t key_num)
 
     uint32_t lamp_count = mapped_lamp_count();
     for (uint32_t lamp = 0; lamp < lamp_count; lamp++) {
-        if (LED_to_Key_Map[lamp] == key_num) {
+        if (keyboard_lighting_topology_key_for_led((uint16_t)lamp) == key_num) {
             Controller.fade_levels[lamp] = 255;
         }
     }
@@ -154,12 +156,13 @@ static bool find_key_center(uint8_t key_num, float *x, float *y, float *z)
     uint32_t count = 0;
 
     for (uint32_t lamp = 0; lamp < lamp_count; lamp++) {
-        if (LED_to_Key_Map[lamp] != key_num) {
+        const Position *position = keyboard_lighting_topology_position_for_led((uint16_t)lamp);
+        if (keyboard_lighting_topology_key_for_led((uint16_t)lamp) != key_num || position == NULL) {
             continue;
         }
-        sum_x += (float)LampPositions[lamp].x;
-        sum_y += (float)LampPositions[lamp].y;
-        sum_z += (float)LampPositions[lamp].z;
+        sum_x += (float)position->x;
+        sum_y += (float)position->y;
+        sum_z += (float)position->z;
         count++;
     }
 
@@ -483,9 +486,13 @@ static void NeopixelRippleStep(void)
         float life = 1.0f - ((float)ripple->age / (float)(max_age + 1u));
 
         for (uint32_t lamp = 0; lamp < Controller.pixel_cnt; lamp++) {
-            float dx = (float)LampPositions[lamp].x - ripple->x;
-            float dy = (float)LampPositions[lamp].y - ripple->y;
-            float dz = (float)LampPositions[lamp].z - ripple->z;
+            const Position *position = keyboard_lighting_topology_position_for_led((uint16_t)lamp);
+            if (position == NULL) {
+                continue;
+            }
+            float dx = (float)position->x - ripple->x;
+            float dy = (float)position->y - ripple->y;
+            float dz = (float)position->z - ripple->z;
             float distance = sqrtf(dx * dx + dy * dy + dz * dz);
             float delta = fabsf(distance - radius);
 

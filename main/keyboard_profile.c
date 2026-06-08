@@ -7,8 +7,8 @@
 #include "nvs.h"
 #include "sdkconfig.h"
 #include "nvs_config.h"
+#include "keyboard_lighting_topology.h"
 #include "led.h"
-#include "lightmap.h"
 #include "lamp_array/pixel.h"
 
 static const char *TAG = "keyboard_profile";
@@ -459,8 +459,8 @@ void keyboard_profile_set_default(keyboard_profile_t *profile)
     profile->lighting_active_preset = 0;
     memset(profile->lighting_reserved, 0, sizeof(profile->lighting_reserved));
     lighting_preset_set(&profile->lighting_presets[0], false, YBK_LED_MODE_SOLID, 100, 50, 255, 255, 255);
-    lighting_preset_set(&profile->lighting_presets[1], true, YBK_LED_MODE_SOLID, 100, 50, 255, 255, 255);
-    lighting_preset_set(&profile->lighting_presets[2], true, YBK_LED_MODE_BREATH, 80, 35, 80, 220, 255);
+    lighting_preset_set(&profile->lighting_presets[1], false, YBK_LED_MODE_SOLID, 100, 50, 255, 255, 255);
+    lighting_preset_set(&profile->lighting_presets[2], false, YBK_LED_MODE_BREATH, 80, 35, 80, 220, 255);
     lighting_preset_set(&profile->lighting_presets[3], false, YBK_LED_MODE_WAVE, 100, 35, 80, 120, 255);
     lighting_preset_set(&profile->lighting_presets[4], false, YBK_LED_MODE_RAINBOW, 100, 40, 255, 255, 255);
     lighting_preset_set(&profile->lighting_presets[5], false, YBK_LED_MODE_HID, 100, 50, 255, 255, 255);
@@ -760,8 +760,8 @@ static void build_static_lamp_colors(const keyboard_lighting_preset_t *preset, L
     memset(lamp_colors, 0, lamp_count * sizeof(*lamp_colors));
 
     for (uint32_t lamp = 0; lamp < lamp_count; lamp++) {
-        uint8_t key_num = LED_to_Key_Map[lamp];
-        if (key_num == 0xFF || key_num >= YBK_MAX_KEYS) {
+        uint8_t key_num = keyboard_lighting_topology_key_for_led((uint16_t)lamp);
+        if (key_num == YBK_LIGHTING_NO_KEY || key_num >= YBK_MAX_KEYS) {
             continue;
         }
 
@@ -853,9 +853,10 @@ static void apply_lighting_values(uint8_t mode, bool enabled, uint8_t brightness
     }
     NeopixelSetEffect(effect, color, normalize_effect_speed(speed));
     if (effect == STATIC_MAP && preset != NULL) {
-        LampColor lamp_colors[LIGHTMAP_NUM];
-        build_static_lamp_colors(preset, lamp_colors, LIGHTMAP_NUM);
-        NeopixelSetCustomColors(lamp_colors, LIGHTMAP_NUM);
+        LampColor lamp_colors[YBK_LIGHTING_MAX_LAMPS] = {0};
+        uint32_t lamp_count = keyboard_lighting_topology_get_led_count();
+        build_static_lamp_colors(preset, lamp_colors, lamp_count);
+        NeopixelSetCustomColors(lamp_colors, lamp_count);
     }
 }
 
@@ -1154,6 +1155,23 @@ void keyboard_profile_preview_lighting_preset(const keyboard_lighting_preset_t *
                           preview.green,
                           preview.blue,
                           &preview);
+}
+
+void keyboard_profile_preview_led_index(uint16_t led_index, uint8_t brightness,
+                                        uint8_t red, uint8_t green, uint8_t blue)
+{
+    if (led_index >= keyboard_lighting_topology_get_led_count()) {
+        return;
+    }
+    if (brightness > 100) {
+        brightness = 100;
+    }
+
+    LampColor lamp_colors[YBK_LIGHTING_MAX_LAMPS] = {0};
+    lamp_colors[led_index] = make_scaled_color(brightness, red, green, blue);
+    led_state = true;
+    NeopixelSetEffect(STATIC_MAP, lamp_colors[led_index], PROFILE_EFFECT_SPEED_DEFAULT);
+    NeopixelSetCustomColors(lamp_colors, keyboard_lighting_topology_get_led_count());
 }
 
 void keyboard_profile_note_pressed_keys(const int *pressed_pins, int num_pressed_pins)

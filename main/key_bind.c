@@ -208,11 +208,6 @@ void process_key_press(int *pressed_pins, int num_pressed_pins)
 {
     keyboard_profile_note_pressed_keys(pressed_pins, num_pressed_pins);
 
-    if (num_pressed_pins == 0) {
-        keyboard_transport_send_keyboard_report(0, NULL);
-        return;
-    }
-
     TickType_t current_time = xTaskGetTickCount();
     keyboard_input_report_t report = {0};
 
@@ -229,5 +224,5 @@ void process_key_press(int *pressed_pins, int num_pressed_pins)
         handle_power_action(report.power_actions[i], current_time);
     }
 
-    keyboard_transport_send_keyboard_report(report.modifier, report.keycodes);
+    keyboard_transport_send_keyboard_report(&report);
 }

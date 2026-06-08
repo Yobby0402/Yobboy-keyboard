@@ -1,16 +1,20 @@
 ﻿import { ACTION_TYPES, CONSUMERS, KEYCODES, MODIFIERS, actionLabel } from "./keycodes.js";
 import { defaultLayout, layoutBounds, parseKle } from "./layout.js";
 import {
+  YbkBluetooth,
   COMMAND,
+  LIGHTING_TOPOLOGY,
   PROFILE,
   YbkSerial,
   checksumOfProfile,
   cloneProfile,
   createEmptyProfile,
+  decodeLightingTopology,
   decodeKeyState,
   decodeLayoutMeta,
   decodeRuntimeState,
   encodeLayoutMeta,
+  encodeLightingTopology,
   fnv1a,
   getAction,
   getLighting,
@@ -21,6 +25,7 @@ import {
   lightingBytes,
   lightingPresetBytes,
   ledPreviewPayload,
+  ledIndexPreviewPayload,
   setAction,
   setLightingActivePreset,
   setLightingKeyColor,
@@ -33,6 +38,7 @@ import {
 
 const els = {
   connect: document.querySelector("#btn-connect"),
+  transportSelect: document.querySelector("#transport-select"),
   read: document.querySelector("#btn-read"),
   save: document.querySelector("#btn-save"),
   reboot: document.querySelector("#btn-reboot"),
@@ -47,9 +53,13 @@ const els = {
   statusText: document.querySelector("#status-text"),
   statusDot: document.querySelector("#status-dot"),
   console: document.querySelector("#console-mini"),
+  keyboardScroll: document.querySelector("#keyboard-scroll"),
+  keyboardFit: document.querySelector("#keyboard-fit"),
   canvas: document.querySelector("#keyboard-canvas"),
   layoutName: document.querySelector("#layout-name"),
   keyboardNameInput: document.querySelector("#keyboard-name-input"),
+  usbProductNameInput: document.querySelector("#usb-product-name-input"),
+  bleDeviceNameInput: document.querySelector("#ble-device-name-input"),
   layoutSource: document.querySelector("#layout-source"),
   layoutNote: document.querySelector("#layout-note"),
   layerSwitch: document.querySelector("#layer-switch"),
@@ -68,9 +78,11 @@ const els = {
   modifierGrid: document.querySelector("#modifier-grid"),
   consumerSelect: document.querySelector("#consumer-select"),
   keyNumber: document.querySelector("#key-number-input"),
+  ledIndex: document.querySelector("#led-index-input"),
   clearKey: document.querySelector("#btn-clear-key"),
   restoreKey: document.querySelector("#btn-restore-key"),
   applyBinding: document.querySelector("#btn-apply-binding"),
+  previewLedIndex: document.querySelector("#btn-preview-led-index"),
   ledEnabled: document.querySelector("#led-enabled"),
   addLightConfig: document.querySelector("#btn-add-light-config"),
   lightingConfigMeta: document.querySelector("#lighting-config-meta"),
@@ -78,6 +90,7 @@ const els = {
   lightingPresetList: document.querySelector("#lighting-preset-list"),
   lightingPresetEmpty: document.querySelector("#lighting-preset-empty"),
   lightingAutoCycle: document.querySelector("#lighting-auto-cycle"),
+  lightingWebPreview: document.querySelector("#lighting-web-preview"),
   lightingCycleInterval: document.querySelector("#lighting-cycle-interval"),
   ledMode: document.querySelector("#led-mode"),
   brightness: document.querySelector("#brightness-slider"),
@@ -86,6 +99,12 @@ const els = {
   speedOut: document.querySelector("#speed-output"),
   ledColor: document.querySelector("#led-color"),
   lightingStaticActions: document.querySelector("#lighting-static-actions"),
+  lightingGroupEditor: document.querySelector("#lighting-group-editor"),
+  lightingGroupMeta: document.querySelector("#lighting-group-meta"),
+  lightingGroupList: document.querySelector("#lighting-group-list"),
+  addLightGroup: document.querySelector("#btn-add-light-group"),
+  groupFillAll: document.querySelector("#btn-group-fill-all"),
+  groupClear: document.querySelector("#btn-group-clear"),
   staticSelectAll: document.querySelector("#btn-static-select-all"),
   staticClearAll: document.querySelector("#btn-static-clear-all"),
   previewLight: document.querySelector("#btn-preview-light"),
@@ -113,6 +132,7 @@ const els = {
   settingsTabs: Array.from(document.querySelectorAll("[data-settings-tab]")),
   settingsPanels: Array.from(document.querySelectorAll("[data-settings-panel]")),
   mapMode: document.querySelector("#btn-map-mode"),
+  ledMapMode: document.querySelector("#btn-led-map-mode"),
   defaultLayout: document.querySelector("#btn-default-layout"),
   kleDialog: document.querySelector("#kle-dialog"),
   kleInput: document.querySelector("#kle-input"),
@@ -127,7 +147,6 @@ const els = {
   inputTestStatus: document.querySelector("#input-test-status"),
   changeList: document.querySelector("#change-list"),
   changeListEmpty: document.querySelector("#change-list-empty"),
-  lightPreviewNote: document.querySelector("#light-preview-note"),
   protocolVersion: document.querySelector("#protocol-version"),
   profileVersion: document.querySelector("#profile-version"),
   profileChecksum: document.querySelector("#profile-checksum"),
@@ -170,11 +189,16 @@ const I18N = {
     deviceScanDisconnected: "Connect the keyboard to read matrix state.",
     deviceScanActive: "Matrix",
     keyboardName: "Keyboard Name",
+    usbProductName: "USB Product Name",
+    bleDeviceName: "BLE Device Name",
     changeList: "Change List",
     changeListEmpty: "No unsaved changes.",
     changeName: "Keyboard Name",
+    changeUsbName: "USB Product Name",
+    changeBleName: "BLE Device Name",
     changeLighting: "Lighting",
     changeKeyNumber: "Key Number",
+    changeLedIndex: "LED Index",
     changeBinding: "Binding",
     tabKeymap: "Keymap",
     tabLighting: "Lighting",
@@ -190,6 +214,7 @@ const I18N = {
     lightingAutoCycle: "Auto Cycle",
     lightingAutoCycleHint: "When enabled, the keyboard lighting-switch key pauses or resumes cycling.",
     cycleInterval: "Cycle Interval (s)",
+    webPreview: "Web Preview",
     preset: "Preset",
     activePreset: "Active Preset",
     setActivePreset: "Set As Current",
@@ -197,6 +222,30 @@ const I18N = {
     lightingEditHint: "In Group Static or Per-Key Static, click keys in the keyboard view to edit lighting.",
     lightPreviewNote: "Web preview follows the selected preset. Static modes can also be pushed to the device preview.",
     reactivePreviewHint: "Reactive effects need a real key press on the device after preview is sent.",
+    staticGroups: "Static Groups",
+    addGroup: "Add Group",
+    applyGroupToAll: "Apply Group To All Keys",
+    clearCurrentGroup: "Clear Current Group",
+    group: "Group",
+    groupKeys: "keys",
+    noGroupSelected: "No group selected",
+    infoLightingConfigs: "Each config is one lighting slot stored in the keyboard. Add only the ones you actually want to cycle through.",
+    infoLightingEditor: "Edit the selected lighting config here. For grouped or per-key static lighting, click keys in the keyboard view to assign color.",
+    infoLightingAutoCycle: "When enabled, the keyboard's lighting-switch key becomes pause or resume for the lighting loop instead of next-effect.",
+    infoWebPreview: "Turn this off if the browser preview feels distracting. Device preview and saved lighting are not affected.",
+    infoCycleInterval: "How long this config stays active before auto cycle moves to the next enabled config.",
+    infoEffectMode: "Choose the lighting behavior for this config. Static group editing becomes available in grouped and per-key static modes.",
+    infoBrightness: "Sets overall output brightness. In grouped static editing, it also becomes the brightness for the selected color group.",
+    infoEffectSpeed: "Controls the refresh rate or animation speed of the current effect.",
+    infoRgbColor: "Sets the base color. In grouped static editing, this is the color of the selected group.",
+    infoStaticGroups: "Grouped static lighting is stored as per-key colors. Add a group, pick its color and brightness, then click keys to assign that group.",
+    infoPowerModeDefault: "This decides which scan-speed profile the keyboard enters after boot.",
+    infoPowerModeCycle: "If enabled, the dedicated power-mode key can switch between Game, Office, and Saver on the keyboard itself.",
+    infoSocd: "SOCD resolves opposite directions while both keys are physically held. It does not inject extra taps after release.",
+    infoSocdDelay: "Delay before the newly pressed opposite direction takes over. Random mode picks a value between 1 and this value.",
+    infoReverseTap: "Reverse Tap injects a short opposite direction after release, which is useful for counter-strafe style input.",
+    infoReverseTapDelay: "Wait time after releasing the key before the reverse tap starts.",
+    infoReverseTapDuration: "How long the injected opposite direction stays active.",
     selectAllKeys: "Select All Keys",
     clearAllKeys: "Clear All Keys",
     paintAllKeys: "Paint All Keys",
@@ -224,6 +273,8 @@ const I18N = {
     modifier: "MODIFIER",
     controlAction: "CONTROL ACTION",
     keyNumber: "KEY NUMBER",
+    ledIndex: "LED INDEX",
+    previewLed: "Preview LED",
     clearKey: "Clear Key",
     restore: "Restore",
     applyBinding: "Apply Binding",
@@ -288,6 +339,7 @@ const I18N = {
     layoutSource: "LAYOUT SOURCE",
     layoutNote: "Device profile does not include visual layout data.",
     mapMode: "Key Number Map Mode",
+    ledMapMode: "LED Map Mode",
     restoreDefaultLayout: "Restore Default Layout",
     importKleTitle: "Import Keyboard Layout Editor",
     cancel: "Cancel",
@@ -333,11 +385,16 @@ const I18N = {
     deviceScanDisconnected: "请先连接键盘，再读取矩阵按键状态。",
     deviceScanActive: "矩阵",
     keyboardName: "键盘名称",
+    usbProductName: "USB 产品名",
+    bleDeviceName: "BLE 设备名",
     changeList: "变更列表",
     changeListEmpty: "当前没有未保存的变更。",
     changeName: "键盘名称",
+    changeUsbName: "USB 产品名",
+    changeBleName: "BLE 设备名",
     changeLighting: "灯光",
     changeKeyNumber: "键号映射",
+    changeLedIndex: "LED 映射",
     changeBinding: "绑定",
     tabKeymap: "按键",
     tabLighting: "灯光",
@@ -353,6 +410,7 @@ const I18N = {
     lightingAutoCycle: "自动循环",
     lightingAutoCycleHint: "开启后，键盘上的灯效切换键会变成暂停或继续循环。",
     cycleInterval: "循环间隔（秒）",
+    webPreview: "网页预览",
     preset: "预设",
     activePreset: "当前预设",
     setActivePreset: "设为当前",
@@ -360,6 +418,30 @@ const I18N = {
     lightingEditHint: "在分组常亮或逐键静态模式下，直接点击中间键盘按键即可编辑灯光。",
     lightPreviewNote: "网页预览会跟随当前选中的预设，静态模式也可以发送到设备端预览。",
     reactivePreviewHint: "按键渐灭和涟漪这类动态效果，发送预览后需要在设备上真实按下按键才会出现。",
+    staticGroups: "静态分组",
+    addGroup: "添加分组",
+    applyGroupToAll: "整组应用到全部按键",
+    clearCurrentGroup: "清空当前分组",
+    group: "分组",
+    groupKeys: "个键",
+    noGroupSelected: "当前还没有选中分组",
+    infoLightingConfigs: "每个灯光配置就是键盘里的一个灯效槽位。只添加你真正需要切换的几个即可。",
+    infoLightingEditor: "这里编辑当前选中的灯光配置。分组常亮或逐键静态时，直接点击中间键盘即可给按键分配颜色。",
+    infoLightingAutoCycle: "开启后，键盘上的灯效切换键不再是切到下一个效果，而是暂停或继续自动循环。",
+    infoWebPreview: "如果网页预览太花或者影响观察，可以关闭。它不会影响设备预览，也不会影响最终保存。",
+    infoCycleInterval: "自动循环开启后，这个配置停留多久再切到下一个已启用配置。",
+    infoEffectMode: "选择这个配置使用的灯效模式。分组常亮和逐键静态会额外出现分组编辑能力。",
+    infoBrightness: "设置整体亮度。在静态分组编辑里，它也会成为当前分组的亮度。",
+    infoEffectSpeed: "控制当前灯效的动画速度或刷新节奏。",
+    infoRgbColor: "设置基础颜色。在静态分组编辑里，它也会成为当前分组的颜色。",
+    infoStaticGroups: "分组常亮最终会以逐键颜色写入配置。先添加分组，设置颜色和亮度，再点击键盘上的按键把它们分配到这个分组。",
+    infoPowerModeDefault: "决定键盘上电后默认进入哪一种扫描速度配置。",
+    infoPowerModeCycle: "开启后，可以通过键盘上的功耗切换键在游戏、办公、节能三种模式之间轮换。",
+    infoSocd: "SOCD 只处理两个相反方向同时按住时的最终输出，不会在松手后主动补键。",
+    infoSocdDelay: "新按下的相反方向在接管前要等待多久。开启随机后，会在 1 到这个值之间取随机延时。",
+    infoReverseTap: "反向补键会在松开按键后，主动注入一个短暂的反方向输入，适合部分 FPS 的急停节奏。",
+    infoReverseTapDelay: "松开按键后，要等待多久才开始补这个反向输入。",
+    infoReverseTapDuration: "注入的反向输入会持续多久。",
     selectAllKeys: "全选按键",
     clearAllKeys: "全部清空",
     paintAllKeys: "全部上色",
@@ -387,6 +469,8 @@ const I18N = {
     modifier: "修饰键",
     controlAction: "控制动作",
     keyNumber: "固件键号",
+    ledIndex: "LED 序号",
+    previewLed: "预览 LED",
     clearKey: "清空",
     restore: "恢复",
     applyBinding: "应用绑定",
@@ -451,6 +535,7 @@ const I18N = {
     layoutSource: "布局来源",
     layoutNote: "键盘 profile 当前不包含可视布局数据。",
     mapMode: "键号映射模式",
+    ledMapMode: "LED 映射模式",
     restoreDefaultLayout: "恢复默认布局",
     importKleTitle: "导入 Keyboard Layout Editor",
     cancel: "取消",
@@ -465,15 +550,22 @@ const I18N = {
 };
 
 const state = {
-  serial: new YbkSerial((line) => log(line)),
+  transportMode: localStorage.getItem("ybk-transport") || "serial",
+  transports: {
+    serial: new YbkSerial((line) => log(line)),
+    bluetooth: new YbkBluetooth((line) => log(line)),
+  },
   profile: createEmptyProfile(),
   pristineProfile: createEmptyProfile(),
   layout: defaultLayout(),
   pristineLayout: defaultLayout(),
+  pristineLayoutMeta: null,
+  lightingTopology: null,
   selectedKeyId: null,
   layer: 0,
   dirty: false,
   mapMode: false,
+  ledMapMode: false,
   pressedEvents: new Map(),
   pressedKeyIds: new Set(),
   devicePressedKeyIds: new Set(),
@@ -484,11 +576,38 @@ const state = {
   info: null,
   layoutMeta: null,
   keyboardName: defaultLayout().name,
+  usbProductName: "Yobboy Keyboard",
+  bleDeviceName: "Yobboy Keyboard BLE",
   lang: localStorage.getItem("ybk-lang") || "zh",
   runtimeState: null,
   settingsTab: "keymap",
   lightingPresetIndex: 0,
+  lightingWebPreview: localStorage.getItem("ybk-light-preview") !== "0",
+  lightingDraftGroups: {},
+  lightingSelectedGroupId: {},
 };
+
+state.transports.bluetooth.onStatus = () => {
+  if (state.transportMode !== "bluetooth") return;
+  refreshStatusFromTransport();
+  renderRuntimeState();
+};
+
+function activeTransport() {
+  return state.transports[state.transportMode] || state.transports.serial;
+}
+
+function deviceConnected() {
+  return activeTransport().connected;
+}
+
+function currentBleTransport() {
+  return state.transports.bluetooth;
+}
+
+function transportLogPrefix() {
+  return state.transportMode === "bluetooth" ? "BLE" : "SERIAL";
+}
 
 const EVENT_TO_HID = new Map([
   ["KeyA", 0x04], ["KeyB", 0x05], ["KeyC", 0x06], ["KeyD", 0x07],
@@ -767,11 +886,21 @@ function applyI18n() {
   els.keySearch.placeholder = state.lang === "zh" ? "搜索，例如 KC_ENTER" : "Search, e.g. KC_ENTER";
   els.kleInput.placeholder = state.lang === "zh" ? "粘贴 KLE Raw Data JSON" : "Paste KLE Raw Data JSON here";
   els.keyboardNameInput.placeholder = state.lang === "zh" ? "\u4f8b\u5982\uff1a\u6211\u7684\u952e\u76d8" : "For example: My Keyboard";
+  els.usbProductNameInput.placeholder = state.lang === "zh" ? "\u4f8b\u5982\uff1aUSB \u952e\u76d8" : "For example: USB Keyboard";
+  els.bleDeviceNameInput.placeholder = state.lang === "zh" ? "\u4f8b\u5982\uff1a\u6211\u7684 BLE \u952e\u76d8" : "For example: My BLE Keyboard";
   els.langLabel.textContent = state.lang === "zh" ? "EN" : "CN";
+  for (const button of document.querySelectorAll("[data-help-key]")) {
+    const helpText = t(button.dataset.helpKey);
+    button.title = helpText;
+    button.setAttribute("aria-label", helpText);
+  }
   fillSelects();
   renderKeyPicker();
   updateLayoutSource();
-  setConnectedUi(state.serial.connected);
+  if (els.transportSelect) {
+    els.transportSelect.value = state.transportMode;
+  }
+  setConnectedUi(deviceConnected());
 }
 
 function log(message) {
@@ -786,9 +915,73 @@ function cloneLayoutData(layout) {
   return JSON.parse(JSON.stringify(layout));
 }
 
+function defaultLightingTopology() {
+  return {
+    ledCount: LIGHTING_TOPOLOGY.ACTIVE_LAMPS,
+    ledToKey: Array.from({ length: LIGHTING_TOPOLOGY.MAX_LAMPS }, () => LIGHTING_TOPOLOGY.NO_KEY),
+    positions: Array.from({ length: LIGHTING_TOPOLOGY.MAX_LAMPS }, () => ({ x: 0, y: 0, z: 0 })),
+  };
+}
+
+if (!state.lightingTopology) {
+  state.lightingTopology = defaultLightingTopology();
+}
+
 function setStatus(text, connected = false) {
   els.statusText.textContent = text;
   els.statusDot.classList.toggle("connected", connected);
+}
+
+function sanitizeMetaName(name, fallback) {
+  const trimmed = String(name || "").trim().replace(/\s+/g, " ");
+  return (trimmed || fallback).slice(0, 31);
+}
+
+function sanitizeLedIndex(value) {
+  if (value === "" || value == null) return null;
+  const number = Number(value);
+  if (!Number.isInteger(number)) return null;
+  if (number < 0 || number >= (state.lightingTopology?.ledCount || LIGHTING_TOPOLOGY.ACTIVE_LAMPS)) {
+    return null;
+  }
+  return number;
+}
+
+function buildLightingTopologyFromLayout(layout = state.layout) {
+  const topology = defaultLightingTopology();
+  topology.ledCount = state.lightingTopology?.ledCount || LIGHTING_TOPOLOGY.ACTIVE_LAMPS;
+  for (const key of layout?.keys || []) {
+    const ledIndex = sanitizeLedIndex(key.ledIndex);
+    const keyNumber = Number(key.keyNumber);
+    if (ledIndex == null || !Number.isInteger(keyNumber) || keyNumber <= 0 || keyNumber >= PROFILE.MAX_KEYS) {
+      continue;
+    }
+    topology.ledToKey[ledIndex] = keyNumber;
+    topology.positions[ledIndex] = {
+      x: Math.max(0, Math.round((key.x + key.w / 2) * 1000)),
+      y: Math.max(0, Math.round((key.y + key.h / 2) * 1000)),
+      z: 5000,
+    };
+  }
+  return topology;
+}
+
+function lightingTopologyPayload() {
+  return encodeLightingTopology(state.layout);
+}
+
+function applyLightingTopologyToLayout(topology, layout = state.layout) {
+  state.lightingTopology = topology || defaultLightingTopology();
+  const ledByKey = new Map();
+  for (let ledIndex = 0; ledIndex < (state.lightingTopology.ledCount || 0); ledIndex++) {
+    const keyNumber = state.lightingTopology.ledToKey[ledIndex];
+    if (keyNumber == null || keyNumber === LIGHTING_TOPOLOGY.NO_KEY || ledByKey.has(keyNumber)) continue;
+    ledByKey.set(keyNumber, ledIndex);
+  }
+  for (const key of layout?.keys || []) {
+    const keyNumber = Number(key.keyNumber);
+    key.ledIndex = Number.isInteger(keyNumber) && ledByKey.has(keyNumber) ? ledByKey.get(keyNumber) : null;
+  }
 }
 
 function setDirty(dirty) {
@@ -824,6 +1017,60 @@ function syncKeyboardName(name, updateInput = true) {
   }
 }
 
+function syncUsbProductName(name, updateInput = true) {
+  state.usbProductName = sanitizeMetaName(name, "Yobboy Keyboard");
+  if (updateInput && els.usbProductNameInput.value !== state.usbProductName) {
+    els.usbProductNameInput.value = state.usbProductName;
+  }
+}
+
+function syncBleDeviceName(name, updateInput = true) {
+  state.bleDeviceName = sanitizeMetaName(name, "Yobboy Keyboard BLE");
+  if (updateInput && els.bleDeviceNameInput.value !== state.bleDeviceName) {
+    els.bleDeviceNameInput.value = state.bleDeviceName;
+  }
+}
+
+function transportModeText(mode) {
+  return Number(mode) === 1 ? "BLE" : "USB";
+}
+
+function runtimeStateFromBleStatus(status) {
+  if (!status) return null;
+  return {
+    currentMode: status.currentMode,
+    idleLowScanActive: (status.flags & 0x40) !== 0,
+    lightingPaused: (status.flags & 0x80) !== 0,
+    activeScanIntervalMs: status.activeScanIntervalMs,
+    idleMs: status.idleMs,
+  };
+}
+
+function refreshStatusFromTransport() {
+  if (!deviceConnected()) {
+    setStatus(t("disconnected"), false);
+    return;
+  }
+
+  if (state.transportMode !== "bluetooth") {
+    setStatus("USB CDC", true);
+    return;
+  }
+
+  const status = currentBleTransport().lastStatus;
+  if (!status) {
+    setStatus("BLE", true);
+    return;
+  }
+
+  const parts = [
+    "BLE",
+    `${transportModeText(status.activeTransport)}/${powerModeLabel(status.currentMode)}`,
+    `${status.activeScanIntervalMs} ms`,
+  ];
+  setStatus(parts.join(" | "), true);
+}
+
 function setConnectedUi(connected) {
   els.connect.textContent = connected ? t("disconnect") : t("connect");
   els.read.disabled = !connected;
@@ -842,7 +1089,9 @@ function setConnectedUi(connected) {
       startDeviceScan();
     }
   }
-  setStatus(connected ? t("connected") : t("disconnected"), connected);
+  updateInfo();
+  refreshStatusFromTransport();
+  renderInspector();
 }
 
 function updateLayoutSource() {
@@ -854,7 +1103,8 @@ function updateLayoutSource() {
       : t("localDefault");
   els.layoutSource.textContent = `${source} / ${state.layout.layoutId || "custom"} / 0x${hash.toString(16).padStart(8, "0")}`;
   if (state.layoutMeta) {
-    els.layoutNote.textContent = `Device: ${state.layoutMeta.keyboardName || "--"} / ${state.layoutMeta.layoutId || "--"} / 0x${state.layoutMeta.layoutHash.toString(16).padStart(8, "0")}`;
+    els.layoutNote.textContent =
+      `Device: ${state.layoutMeta.keyboardName || "--"} / USB ${state.layoutMeta.usbProductName || "--"} / BLE ${state.layoutMeta.bleDeviceName || "--"} / ${state.layoutMeta.layoutId || "--"} / 0x${state.layoutMeta.layoutHash.toString(16).padStart(8, "0")}`;
   } else {
     els.layoutNote.textContent = t("layoutNote");
   }
@@ -874,7 +1124,13 @@ function layoutHash(layout) {
 }
 
 function layoutMetaPayload() {
-  return encodeLayoutMeta(state.layout.layoutId || "custom", layoutHash(state.layout), state.keyboardName);
+  return encodeLayoutMeta(
+    state.layout.layoutId || "custom",
+    layoutHash(state.layout),
+    state.keyboardName,
+    state.usbProductName,
+    state.bleDeviceName,
+  );
 }
 
 function selectedKey() {
@@ -934,6 +1190,208 @@ function clampCycleInterval(value) {
   return Math.max(1, Math.min(120, Math.round(numeric)));
 }
 
+function updateKeyboardScale() {
+  const bounds = layoutBounds(state.layout);
+  const availableWidth = Math.max(320, (els.keyboardScroll?.clientWidth || bounds.width) - 4);
+  const scale = bounds.width > 0 ? Math.min(1.85, Math.max(0.72, availableWidth / bounds.width)) : 1;
+  const visualWidth = bounds.width * scale;
+  const offsetX = Math.max((availableWidth - visualWidth) / 2, 0);
+  els.keyboardFit.style.height = `${Math.ceil(bounds.height * scale)}px`;
+  els.canvas.style.transform = `translateX(${offsetX}px) scale(${scale})`;
+}
+
+function lightingColorId(color) {
+  return `${Number(color.red || 0)}-${Number(color.green || 0)}-${Number(color.blue || 0)}-${Number(color.brightness || 0)}`;
+}
+
+function lightingGroupStoreKey(presetIndex = state.lightingPresetIndex) {
+  return String(clampLightingPresetIndex(presetIndex));
+}
+
+function currentLightingBrush() {
+  const rgb = hexToRgb(els.ledColor.value);
+  return {
+    ...rgb,
+    brightness: Number(els.brightness.value || 0),
+  };
+}
+
+function draftLightingGroups(presetIndex = state.lightingPresetIndex) {
+  const key = lightingGroupStoreKey(presetIndex);
+  if (!Array.isArray(state.lightingDraftGroups[key])) {
+    state.lightingDraftGroups[key] = [];
+  }
+  return state.lightingDraftGroups[key];
+}
+
+function realLightingGroups(profile = state.profile, presetIndex = state.lightingPresetIndex) {
+  const groups = new Map();
+  for (let keyNumber = 0; keyNumber < PROFILE.MAX_KEYS; keyNumber++) {
+    const color = getLightingKeyColor(profile, presetIndex, keyNumber);
+    if (color.brightness <= 0) continue;
+    const id = lightingColorId(color);
+    const existing = groups.get(id) || {
+      id,
+      red: color.red,
+      green: color.green,
+      blue: color.blue,
+      brightness: color.brightness,
+      keyCount: 0,
+      draft: false,
+    };
+    existing.keyCount += 1;
+    groups.set(id, existing);
+  }
+  return Array.from(groups.values()).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function lightingGroupsForPreset(presetIndex = state.lightingPresetIndex) {
+  const groups = realLightingGroups(state.profile, presetIndex);
+  const existingIds = new Set(groups.map((group) => group.id));
+  for (const draft of draftLightingGroups(presetIndex)) {
+    if (existingIds.has(draft.id)) continue;
+    groups.push({
+      ...draft,
+      keyCount: 0,
+      draft: true,
+    });
+  }
+  return groups;
+}
+
+function selectedLightingGroupId(presetIndex = state.lightingPresetIndex) {
+  return state.lightingSelectedGroupId[lightingGroupStoreKey(presetIndex)] || null;
+}
+
+function setSelectedLightingGroupId(groupId, presetIndex = state.lightingPresetIndex) {
+  const key = lightingGroupStoreKey(presetIndex);
+  if (groupId) {
+    state.lightingSelectedGroupId[key] = groupId;
+  } else {
+    delete state.lightingSelectedGroupId[key];
+  }
+}
+
+function findLightingGroup(groupId, presetIndex = state.lightingPresetIndex) {
+  return lightingGroupsForPreset(presetIndex).find((group) => group.id === groupId) || null;
+}
+
+function syncLightingGroupSelection(presetIndex = state.lightingPresetIndex) {
+  const groups = lightingGroupsForPreset(presetIndex);
+  if (!groups.length) {
+    setSelectedLightingGroupId(null, presetIndex);
+    return null;
+  }
+  const currentId = selectedLightingGroupId(presetIndex);
+  if (currentId && groups.some((group) => group.id === currentId)) {
+    return currentId;
+  }
+  setSelectedLightingGroupId(groups[0].id, presetIndex);
+  return groups[0].id;
+}
+
+function setLightingControlsFromGroup(group) {
+  if (!group) return;
+  els.ledColor.value = rgbToHex(group.red, group.green, group.blue);
+  els.brightness.value = String(group.brightness);
+  els.brightnessOut.textContent = `${group.brightness}%`;
+}
+
+function addLightingGroup() {
+  const brush = currentLightingBrush();
+  const groupId = lightingColorId(brush);
+  const presetIndex = state.lightingPresetIndex;
+  const groups = lightingGroupsForPreset(presetIndex);
+  const existing = groups.find((group) => group.id === groupId);
+  if (!existing) {
+    draftLightingGroups(presetIndex).push({
+      id: groupId,
+      ...brush,
+      draft: true,
+    });
+  }
+  setSelectedLightingGroupId(groupId, presetIndex);
+  renderLighting();
+  renderKeyboard();
+}
+
+function clearLightingGroupKeys(group) {
+  if (!group) return;
+  for (let keyNumber = 0; keyNumber < PROFILE.MAX_KEYS; keyNumber++) {
+    const color = getLightingKeyColor(state.profile, state.lightingPresetIndex, keyNumber);
+    if (lightingColorId(color) !== group.id || color.brightness <= 0) continue;
+    setLightingKeyColor(state.profile, state.lightingPresetIndex, keyNumber, {
+      red: 0,
+      green: 0,
+      blue: 0,
+      brightness: 0,
+    });
+  }
+}
+
+function removeLightingGroup(groupId) {
+  const presetIndex = state.lightingPresetIndex;
+  const drafts = draftLightingGroups(presetIndex);
+  const draftIndex = drafts.findIndex((group) => group.id === groupId);
+  if (draftIndex >= 0) {
+    drafts.splice(draftIndex, 1);
+  }
+  const real = realLightingGroups(state.profile, presetIndex).find((group) => group.id === groupId);
+  if (real) {
+    clearLightingGroupKeys(real);
+    setDirty(true);
+  }
+  if (selectedLightingGroupId(presetIndex) === groupId) {
+    setSelectedLightingGroupId(null, presetIndex);
+  }
+  renderLighting();
+  renderKeyboard();
+}
+
+function applyLightingGroupToAllKeys(group) {
+  if (!group) return;
+  for (const key of state.layout.keys) {
+    if (key.keyNumber == null) continue;
+    setLightingKeyColor(state.profile, state.lightingPresetIndex, key.keyNumber, {
+      red: group.red,
+      green: group.green,
+      blue: group.blue,
+      brightness: group.brightness,
+    });
+  }
+  setDirty(true);
+  renderLighting();
+  renderKeyboard();
+}
+
+function updateLightingGroupColor(groupId, nextColor) {
+  const presetIndex = state.lightingPresetIndex;
+  const realGroup = realLightingGroups(state.profile, presetIndex).find((group) => group.id === groupId);
+  if (realGroup) {
+    for (let keyNumber = 0; keyNumber < PROFILE.MAX_KEYS; keyNumber++) {
+      const color = getLightingKeyColor(state.profile, presetIndex, keyNumber);
+      if (color.brightness <= 0 || lightingColorId(color) !== groupId) continue;
+      setLightingKeyColor(state.profile, presetIndex, keyNumber, nextColor);
+    }
+    setDirty(true);
+  }
+
+  const drafts = draftLightingGroups(presetIndex);
+  const draft = drafts.find((group) => group.id === groupId);
+  if (draft) {
+    draft.red = nextColor.red;
+    draft.green = nextColor.green;
+    draft.blue = nextColor.blue;
+    draft.brightness = nextColor.brightness;
+    draft.id = lightingColorId(nextColor);
+  }
+
+  const nextId = lightingColorId(nextColor);
+  if (selectedLightingGroupId(presetIndex) === groupId) {
+    setSelectedLightingGroupId(nextId, presetIndex);
+  }
+}
+
 function ensureLightingPresetSelection(profile = state.profile) {
   const enabled = enabledLightingPresetIndices(profile);
   if (!enabled.length) {
@@ -987,6 +1445,7 @@ function rgbCss({ red, green, blue }, alpha = 1) {
 }
 
 function lightingClassForKey(key, lighting) {
+  if (!state.lightingWebPreview) return null;
   if (!lighting.enabled) return null;
   if (lighting.mode !== 6 && lighting.brightness <= 0) return null;
   const keyPressed = state.pressedKeyIds.has(key.id) || state.devicePressedKeyIds.has(key.id);
@@ -1050,11 +1509,12 @@ function handleLightingKeyEdit(key) {
     return true;
   }
   if (preset.mode === 6) {
-    const rgb = hexToRgb(els.ledColor.value);
-    const brightness = Number(els.brightness.value || 0);
+    const group = findLightingGroup(syncLightingGroupSelection()) || currentLightingBrush();
     setLightingKeyColor(state.profile, state.lightingPresetIndex, key.keyNumber, {
-      ...rgb,
-      brightness,
+      red: group.red,
+      green: group.green,
+      blue: group.blue,
+      brightness: group.brightness,
     });
     setLightingPreset(state.profile, state.lightingPresetIndex, { ...preset, enabled: true });
     setDirty(true);
@@ -1152,6 +1612,8 @@ function removeLightingConfig(index) {
     green: preset.green,
     blue: preset.blue,
   });
+  delete state.lightingDraftGroups[lightingGroupStoreKey(index)];
+  delete state.lightingSelectedGroupId[lightingGroupStoreKey(index)];
 
   const enabled = enabledLightingPresetIndices();
   const lighting = getLighting(state.profile);
@@ -1230,7 +1692,7 @@ function rebuildPressedKeys() {
 
 function updateInputTestStatus() {
   const parts = [];
-  if (!state.serial.connected) {
+  if (!deviceConnected()) {
     parts.push(t("inputTestDisconnected"));
   } else if (els.toggleInputTest.checked) {
     const labels = [];
@@ -1250,7 +1712,7 @@ function updateInputTestStatus() {
     parts.push(t("inputTestOff"));
   }
 
-  if (!state.serial.connected) {
+  if (!deviceConnected()) {
     parts.push(t("deviceScanDisconnected"));
   } else if (els.toggleDeviceScan.checked) {
     parts.push(state.devicePressedNumbers.length
@@ -1310,7 +1772,8 @@ function renderKeyboard() {
     const staticHint = state.settingsTab === "lighting" && isStaticLightingMode(lighting.mode)
       ? ` / ${staticLightingHint(lighting)}`
       : "";
-    button.title = `${state.lang === "zh" ? "\u952e" : "Key"} ${key.keyNumber || "unmapped"}: ${displayKeyLabel(key.label)}${fnDiff ? (state.lang === "zh" ? " / \u4e0e Base \u4e0d\u540c" : " / differs from Base") : ""}${staticHint}`;
+    const ledHint = ` / LED ${key.ledIndex ?? "--"}`;
+    button.title = `${state.lang === "zh" ? "\u952e" : "Key"} ${key.keyNumber || "unmapped"}: ${displayKeyLabel(key.label)}${ledHint}${fnDiff ? (state.lang === "zh" ? " / \u4e0e Base \u4e0d\u540c" : " / differs from Base") : ""}${staticHint}`;
     button.addEventListener("click", () => {
       if (state.settingsTab === "lighting" && isStaticLightingMode(lighting.mode) && handleLightingKeyEdit(key)) {
         return;
@@ -1320,7 +1783,9 @@ function renderKeyboard() {
 
     const num = document.createElement("span");
     num.className = "key-number";
-    num.textContent = els.toggleKeyNumber.checked ? (key.keyNumber ?? "--") : "";
+    num.textContent = els.toggleKeyNumber.checked
+      ? (state.ledMapMode ? (key.ledIndex ?? "--") : (key.keyNumber ?? "--"))
+      : "";
 
     const label = document.createElement("span");
     label.textContent = displayKeyLabel(key.label);
@@ -1334,6 +1799,7 @@ function renderKeyboard() {
     button.append(num, label, binding);
     els.canvas.appendChild(button);
   }
+  updateKeyboardScale();
 }
 
 function renderLayerSwitch() {
@@ -1433,9 +1899,11 @@ function renderInspector() {
   els.keyId.textContent = key?.keyNumber ?? "--";
   els.layerId.textContent = String(state.layer);
   els.keyNumber.value = key?.keyNumber ?? "";
+  els.ledIndex.value = key?.ledIndex ?? "";
   els.actionType.value = String(action.type);
   els.keySelect.value = String(action.code);
   els.consumerSelect.value = String(action.code);
+  els.previewLedIndex.disabled = !deviceConnected() || sanitizeLedIndex(key?.ledIndex) == null;
   for (const checkbox of els.modifierGrid.querySelectorAll("input")) {
     checkbox.checked = (action.code & Number(checkbox.value)) !== 0;
   }
@@ -1485,17 +1953,22 @@ function renderLighting() {
   els.ledEnabled.checked = hasConfigs;
   els.addLightConfig.disabled = enabledCount >= PROFILE.LIGHTING_PRESET_COUNT;
   els.lightingAutoCycle.disabled = !hasConfigs;
+  els.lightingWebPreview.disabled = false;
   els.lightingCycleInterval.disabled = !hasConfigs;
   els.ledMode.disabled = !hasConfigs;
   els.brightness.disabled = !hasConfigs;
   els.speed.disabled = !hasConfigs;
   els.ledColor.disabled = !hasConfigs;
-  els.previewLight.disabled = !state.serial.connected || !hasConfigs;
+  els.previewLight.disabled = !deviceConnected() || !hasConfigs;
   els.activateLight.disabled = !hasConfigs;
   els.saveLight.disabled = !hasConfigs;
   els.staticSelectAll.disabled = !hasConfigs;
   els.staticClearAll.disabled = !hasConfigs;
+  els.addLightGroup.disabled = !hasConfigs;
+  els.groupFillAll.disabled = !hasConfigs;
+  els.groupClear.disabled = !hasConfigs;
   els.lightingAutoCycle.checked = lighting.autoCycleEnabled;
+  els.lightingWebPreview.checked = state.lightingWebPreview;
   els.lightingCycleInterval.value = String(clampCycleInterval(preset.cycleIntervalSec));
   els.ledMode.value = String(preset.mode);
   els.brightness.value = String(preset.brightness);
@@ -1504,20 +1977,17 @@ function renderLighting() {
   els.speedOut.textContent = String(preset.speed);
   els.ledColor.value = rgbToHex(preset.red, preset.green, preset.blue);
   const staticMode = hasConfigs && isStaticLightingMode(preset.mode);
-  const reactiveMode = hasConfigs && (Number(preset.mode) === 7 || Number(preset.mode) === 8);
-  els.lightingStaticActions.classList.toggle("hidden", !staticMode);
+  const groupMode = hasConfigs && Number(preset.mode) === 6;
+  els.lightingStaticActions.classList.toggle("hidden", !staticMode || groupMode);
+  els.lightingGroupEditor.classList.toggle("hidden", !groupMode);
   els.staticSelectAll.textContent = preset.mode === 5 ? t("selectAllKeys") : t("paintAllKeys");
   els.staticClearAll.textContent = preset.mode === 5 ? t("clearAllKeys") : t("clearPaintedKeys");
-  const hints = [t("lightPreviewNote")];
-  if (staticMode) hints.push(t("lightingEditHint"));
-  if (reactiveMode) hints.push(t("reactivePreviewHint"));
-  if (lighting.autoCycleEnabled) hints.push(t("lightingAutoCycleHint"));
-  els.lightPreviewNote.textContent = hints.join(" ");
   els.lightingConfigMeta.textContent = `${t("lightingConfigCount")}: ${enabledCount} / ${PROFILE.LIGHTING_PRESET_COUNT}`;
   els.lightingSelectedMeta.textContent = hasConfigs
     ? `${t("lightingConfig")} ${selectedOrder} / ${t("cycleInterval")}: ${clampCycleInterval(preset.cycleIntervalSec)}${intervalUnit}`
     : "--";
   renderLightingPresetList(lighting);
+  renderLightingGroupEditor(groupMode);
 }
 
 function renderLightingPresetList(lighting = getLighting(state.profile)) {
@@ -1576,6 +2046,54 @@ function renderLightingPresetList(lighting = getLighting(state.profile)) {
   });
 }
 
+function renderLightingGroupEditor(enabled) {
+  els.lightingGroupList.innerHTML = "";
+  if (!enabled) {
+    els.lightingGroupMeta.textContent = "";
+    return;
+  }
+
+  const groups = lightingGroupsForPreset();
+  const selectedId = syncLightingGroupSelection();
+  const selected = groups.find((group) => group.id === selectedId) || null;
+  if (selected) {
+    setLightingControlsFromGroup(selected);
+  }
+
+  els.lightingGroupMeta.textContent = groups.length
+    ? `${t("group")} ${groups.length} / ${groups.map((group) => group.keyCount).reduce((sum, count) => sum + count, 0)} ${t("groupKeys")}`
+    : t("noGroupSelected");
+  els.groupFillAll.disabled = !selected;
+  els.groupClear.disabled = !selected;
+
+  for (const group of groups) {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "lighting-group-card";
+    if (group.id === selectedId) card.classList.add("selected");
+    card.innerHTML = `
+      <span class="lighting-group-swatch" style="background:${rgbToHex(group.red, group.green, group.blue)}"></span>
+      <span class="lighting-group-main">
+        <span class="lighting-group-title">${t("group")} ${groups.indexOf(group) + 1}</span>
+        <span class="lighting-group-meta-line">${rgbToHex(group.red, group.green, group.blue).toUpperCase()} / ${group.brightness}% / ${group.keyCount} ${t("groupKeys")}</span>
+      </span>
+      <span class="lighting-group-remove">×</span>
+    `;
+    card.addEventListener("click", (event) => {
+      const remove = event.target instanceof HTMLElement && event.target.closest(".lighting-group-remove");
+      if (remove) {
+        removeLightingGroup(group.id);
+        return;
+      }
+      setSelectedLightingGroupId(group.id);
+      setLightingControlsFromGroup(group);
+      renderLighting();
+      renderKeyboard();
+    });
+    els.lightingGroupList.appendChild(card);
+  }
+}
+
 function renderPowerSettings() {
   const power = getPowerSettings(state.profile);
   els.powerModeDefault.value = String(power.defaultMode);
@@ -1601,7 +2119,9 @@ function renderPowerSettings() {
 }
 
 function renderRuntimeState() {
-  const runtime = state.runtimeState;
+  const runtime = state.transportMode === "bluetooth" && deviceConnected()
+    ? runtimeStateFromBleStatus(currentBleTransport().lastStatus)
+    : state.runtimeState;
   els.runtimeMode.textContent = runtime ? powerModeLabel(runtime.currentMode) : "--";
   els.runtimeScan.textContent = runtime ? `${runtime.activeScanIntervalMs} ms` : "--";
   els.runtimeIdle.textContent = runtime ? formatIdleMs(runtime.idleMs) : "--";
@@ -1640,8 +2160,8 @@ function applyPowerSettings() {
 }
 
 async function pollRuntimeState() {
-  if (!state.serial.connected) return;
-  const ret = await state.serial.command(COMMAND.READ_RUNTIME_STATE, new Uint8Array(), 1200);
+  if (!deviceConnected()) return;
+  const ret = await activeTransport().command(COMMAND.READ_RUNTIME_STATE, new Uint8Array(), 1200);
   if (ret.status !== 0) throw new Error(ret.statusText);
   state.runtimeState = decodeRuntimeState(ret.data);
   renderRuntimeState();
@@ -1657,7 +2177,12 @@ function stopRuntimePoll() {
 }
 
 function startRuntimePoll() {
-  if (!state.serial.connected || state.runtimeTimer) return;
+  if (!deviceConnected()) return;
+  if (state.transportMode === "bluetooth") {
+    renderRuntimeState();
+    return;
+  }
+  if (state.runtimeTimer) return;
   state.runtimeTimer = setInterval(() => {
     pollRuntimeState().catch((error) => {
       log(`[RUNTIME] ${error.message}`);
@@ -1692,8 +2217,8 @@ function updateDevicePressedKeys(keyNumbers) {
 }
 
 async function pollDeviceState() {
-  if (!state.serial.connected || !els.toggleDeviceScan.checked) return;
-  const ret = await state.serial.command(COMMAND.READ_KEY_STATE, new Uint8Array(), 1200);
+  if (!deviceConnected() || !els.toggleDeviceScan.checked) return;
+  const ret = await activeTransport().command(COMMAND.READ_KEY_STATE, new Uint8Array(), 1200);
   if (ret.status !== 0) throw new Error(ret.statusText);
   updateDevicePressedKeys(decodeKeyState(ret.data));
 }
@@ -1710,7 +2235,7 @@ function stopDeviceScan() {
 }
 
 function startDeviceScan() {
-  if (!state.serial.connected || state.scanTimer) return;
+  if (!deviceConnected() || state.scanTimer) return;
   state.scanTimer = setInterval(() => {
     pollDeviceState().catch((error) => {
       log(`[SCAN] ${error.message}`);
@@ -1724,7 +2249,7 @@ function startDeviceScan() {
 }
 
 function handleInputTestKeyDown(event) {
-  if (!state.serial.connected || !els.toggleInputTest.checked || isEditableTarget(event.target)) return;
+  if (!deviceConnected() || !els.toggleInputTest.checked || isEditableTarget(event.target)) return;
   if ((event.ctrlKey || event.metaKey) && !EVENT_TO_MODIFIER.has(event.code)) return;
 
   const info = eventAction(event);
@@ -1744,7 +2269,7 @@ function handleInputTestKeyDown(event) {
 }
 
 function handleInputTestKeyUp(event) {
-  if (!state.serial.connected || !els.toggleInputTest.checked) return;
+  if (!deviceConnected() || !els.toggleInputTest.checked) return;
   state.pressedEvents.delete(event.code);
   if (state.pressedEvents.size === 0) state.inputTestHint = "";
   rebuildPressedKeys();
@@ -1771,6 +2296,7 @@ function applyBinding() {
 
   const mapped = Number(els.keyNumber.value || 0);
   key.keyNumber = mapped > 0 ? mapped : null;
+  key.ledIndex = sanitizeLedIndex(els.ledIndex.value);
 
   if (key.keyNumber) {
     const type = Number(els.actionType.value);
@@ -1808,20 +2334,32 @@ function applyLightingToProfile() {
   updateInputTestStatus();
 }
 
+function handleLightingControlInput() {
+  const preset = selectedLightingPreset();
+  if (Number(preset.mode) === 6) {
+    const groupId = syncLightingGroupSelection();
+    if (groupId) {
+      updateLightingGroupColor(groupId, currentLightingBrush());
+    }
+  }
+  applyLightingToProfile();
+  renderKeyboard();
+}
+
 async function readDeviceProfile() {
-  const info = await state.serial.command(COMMAND.GET_INFO);
+  const info = await activeTransport().command(COMMAND.GET_INFO);
   if (info.status !== 0) throw new Error(info.statusText);
   state.info = parseInfo(info.data);
   updateInfo();
 
-  const profile = await state.serial.command(COMMAND.READ_PROFILE, new Uint8Array(), 2200);
+  const profile = await activeTransport().command(COMMAND.READ_PROFILE, new Uint8Array(), 2200);
   if (profile.status !== 0) throw new Error(profile.statusText);
   if (!validateProfile(profile.data)) throw new Error("Invalid profile received");
   state.profile = cloneProfile(profile.data);
   state.pristineProfile = cloneProfile(profile.data);
   state.lightingPresetIndex = getLighting(state.profile).activePreset;
 
-  const layoutMeta = await state.serial.command(COMMAND.READ_LAYOUT_META, new Uint8Array(), 1600);
+  const layoutMeta = await activeTransport().command(COMMAND.READ_LAYOUT_META, new Uint8Array(), 1600);
   if (layoutMeta.status === 0) {
     state.layoutMeta = decodeLayoutMeta(layoutMeta.data);
     applyDeviceLayoutMeta();
@@ -1830,7 +2368,17 @@ async function readDeviceProfile() {
     log(`[LAYOUT] Read layout meta failed: ${layoutMeta.statusText}`);
   }
 
+  const topology = await activeTransport().command(COMMAND.READ_LIGHTING_TOPOLOGY, new Uint8Array(), 2000);
+  if (topology.status === 0) {
+    applyLightingTopologyToLayout(decodeLightingTopology(topology.data) || defaultLightingTopology());
+  } else {
+    state.lightingTopology = defaultLightingTopology();
+    applyLightingTopologyToLayout(state.lightingTopology);
+    log(`[LIGHT] Read topology failed: ${topology.statusText}`);
+  }
+
   state.pristineLayout = cloneLayoutData(state.layout);
+  state.pristineLayoutMeta = state.layoutMeta ? JSON.parse(JSON.stringify(state.layoutMeta)) : null;
   setDirty(false);
   renderAll();
   log("[DEVICE] Profile loaded");
@@ -1839,17 +2387,22 @@ async function readDeviceProfile() {
 async function saveDeviceProfile() {
   applyLightingToProfile();
   applyPowerSettings();
-  const write = await state.serial.command(COMMAND.WRITE_PROFILE, state.profile, 2200);
+  const write = await activeTransport().command(COMMAND.WRITE_PROFILE, state.profile, 2200);
   if (write.status !== 0) throw new Error(write.statusText);
-  const commit = await state.serial.command(COMMAND.COMMIT_PROFILE, new Uint8Array(), 2200);
+  const commit = await activeTransport().command(COMMAND.COMMIT_PROFILE, new Uint8Array(), 2200);
   if (commit.status !== 0) throw new Error(commit.statusText);
 
-  const layoutRet = await state.serial.command(COMMAND.WRITE_LAYOUT_META, layoutMetaPayload(), 1600);
+  const layoutRet = await activeTransport().command(COMMAND.WRITE_LAYOUT_META, layoutMetaPayload(), 1600);
   if (layoutRet.status !== 0) throw new Error(layoutRet.statusText);
   state.layoutMeta = decodeLayoutMeta(layoutMetaPayload());
 
+  const topologyRet = await activeTransport().command(COMMAND.WRITE_LIGHTING_TOPOLOGY, lightingTopologyPayload(), 2200);
+  if (topologyRet.status !== 0) throw new Error(topologyRet.statusText);
+  applyLightingTopologyToLayout(decodeLightingTopology(lightingTopologyPayload()) || defaultLightingTopology());
+
   state.pristineProfile = cloneProfile(state.profile);
   state.pristineLayout = cloneLayoutData(state.layout);
+  state.pristineLayoutMeta = state.layoutMeta ? JSON.parse(JSON.stringify(state.layoutMeta)) : null;
   setDirty(false);
   log("[DEVICE] Profile committed to NVS");
 }
@@ -1857,6 +2410,8 @@ async function saveDeviceProfile() {
 function applyDeviceLayoutMeta() {
   if (!state.layoutMeta) return;
   syncKeyboardName(state.layoutMeta.keyboardName || state.keyboardName);
+  syncUsbProductName(state.layoutMeta.usbProductName || state.usbProductName);
+  syncBleDeviceName(state.layoutMeta.bleDeviceName || state.bleDeviceName);
   if (state.layoutMeta.layoutId === "yobboy-80" &&
       (state.layoutMeta.layoutHash === 0 || state.layoutMeta.layoutHash === layoutHash(defaultLayout()))) {
     state.layout = defaultLayout();
@@ -1887,7 +2442,8 @@ function parseInfo(data) {
 }
 
 function updateInfo() {
-  els.protocolVersion.textContent = state.info ? `Protocol v${state.info.protocolVersion}` : "Protocol --";
+  const linkLabel = state.transportMode === "bluetooth" ? "BLE" : "USB CDC";
+  els.protocolVersion.textContent = state.info ? `Protocol v${state.info.protocolVersion} / ${linkLabel}` : `Protocol -- / ${linkLabel}`;
   els.profileVersion.textContent = `v${new DataView(state.profile.buffer).getUint16(4, true)}`;
   els.profileChecksum.textContent = `0x${checksumOfProfile(state.profile).toString(16).padStart(8, "0")}`;
   els.profileKeys.textContent = String(state.info?.maxKeys || PROFILE.MAX_KEYS);
@@ -1905,6 +2461,20 @@ function currentChangeItems() {
     items.push({
       title: t("changeName"),
       detail: `${pristineName} -> ${state.keyboardName}`,
+    });
+  }
+
+  const pristineMeta = state.pristineLayoutMeta || {};
+  if (state.usbProductName !== sanitizeMetaName(pristineMeta.usbProductName, "Yobboy Keyboard")) {
+    items.push({
+      title: t("changeUsbName"),
+      detail: `${sanitizeMetaName(pristineMeta.usbProductName, "Yobboy Keyboard")} -> ${state.usbProductName}`,
+    });
+  }
+  if (state.bleDeviceName !== sanitizeMetaName(pristineMeta.bleDeviceName, "Yobboy Keyboard BLE")) {
+    items.push({
+      title: t("changeBleName"),
+      detail: `${sanitizeMetaName(pristineMeta.bleDeviceName, "Yobboy Keyboard BLE")} -> ${state.bleDeviceName}`,
     });
   }
 
@@ -1999,6 +2569,16 @@ function currentChangeItems() {
       });
     }
 
+    const currentLedIndex = sanitizeLedIndex(key.ledIndex);
+    const baseLedIndex = sanitizeLedIndex(baselineKey?.ledIndex);
+    if (currentLedIndex !== baseLedIndex) {
+      items.push({
+        title: `${t("changeLedIndex")} ${displayKeyLabel(key.label)}`,
+        detail: `LED ${baseLedIndex ?? "--"} -> ${currentLedIndex ?? "--"}`,
+        keyId: key.id,
+      });
+    }
+
     for (let layer = 0; layer < PROFILE.LAYERS; layer++) {
       const currentAction = getAction(state.profile, layer, currentNumber);
       const baseAction = getAction(state.pristineProfile, layer, baseNumber);
@@ -2051,6 +2631,8 @@ function renderChangeList() {
 
 function renderAll() {
   syncKeyboardName(state.keyboardName || state.layout.name);
+  syncUsbProductName(state.usbProductName || "Yobboy Keyboard");
+  syncBleDeviceName(state.bleDeviceName || "Yobboy Keyboard BLE");
   updateInfo();
   setSettingsTab(state.settingsTab);
   renderLayerSwitch();
@@ -2093,6 +2675,13 @@ function exportConfig() {
   const data = {
     version: 1,
     layout: state.layout,
+    layoutMeta: {
+      layoutId: state.layout.layoutId || "custom",
+      layoutHash: layoutHash(state.layout),
+      keyboardName: state.keyboardName,
+      usbProductName: state.usbProductName,
+      bleDeviceName: state.bleDeviceName,
+    },
     profileBase64: bytesToBase64(state.profile),
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -2117,6 +2706,19 @@ async function importConfig(file) {
     state.layout = data.layout;
     state.layout.source = state.layout.source || "json";
   }
+  if (data.layoutMeta) {
+    state.layoutMeta = {
+      layoutId: data.layoutMeta.layoutId || state.layout.layoutId || "custom",
+      layoutHash: Number(data.layoutMeta.layoutHash || layoutHash(state.layout)) >>> 0,
+      keyboardName: data.layoutMeta.keyboardName || state.keyboardName,
+      usbProductName: data.layoutMeta.usbProductName || state.usbProductName,
+      bleDeviceName: data.layoutMeta.bleDeviceName || state.bleDeviceName,
+    };
+    syncKeyboardName(data.layoutMeta.keyboardName || state.layout.name);
+    syncUsbProductName(data.layoutMeta.usbProductName || "Yobboy Keyboard");
+    syncBleDeviceName(data.layoutMeta.bleDeviceName || "Yobboy Keyboard BLE");
+  }
+  applyLightingTopologyToLayout(buildLightingTopologyFromLayout(state.layout));
   syncKeyboardName(state.layout.name || state.keyboardName);
   setDirty(true);
   renderAll();
@@ -2126,19 +2728,35 @@ async function importConfig(file) {
 function wireEvents() {
   els.connect.addEventListener("click", async () => {
     try {
-      if (state.serial.connected) {
-        await state.serial.disconnect();
+      const transport = activeTransport();
+      if (transport.connected) {
+        await transport.disconnect();
         setConnectedUi(false);
-        log("[SERIAL] Disconnected");
+        log(`[${transportLogPrefix()}] Disconnected`);
         return;
       }
-      await state.serial.connect();
+      await transport.connect();
       setConnectedUi(true);
-      log("[SERIAL] Connected. Select the Config CDC port.");
+      log(state.transportMode === "bluetooth"
+        ? "[BLE] Connected to custom config service."
+        : "[SERIAL] Connected. Select the Config CDC port.");
     } catch (error) {
       log(`[ERROR] ${error.message}`);
       setStatus(t("connectFailed"), false);
     }
+  });
+
+  els.transportSelect?.addEventListener("change", async () => {
+    const previous = activeTransport();
+    if (previous.connected) {
+      await previous.disconnect();
+    }
+    state.transportMode = els.transportSelect.value === "bluetooth" ? "bluetooth" : "serial";
+    localStorage.setItem("ybk-transport", state.transportMode);
+    setConnectedUi(deviceConnected());
+    updateInputTestStatus();
+    refreshStatusFromTransport();
+    log(`[TRANSPORT] ${state.transportMode === "bluetooth" ? "BLE" : "USB CDC"} selected`);
   });
 
   els.help.addEventListener("click", () => {
@@ -2178,7 +2796,7 @@ function wireEvents() {
   els.reboot.addEventListener("click", async () => {
     if (!confirm(t("confirmReboot"))) return;
     try {
-      await state.serial.command(COMMAND.REBOOT);
+      await activeTransport().command(COMMAND.REBOOT);
       log("[DEVICE] Reboot command sent");
     } catch (error) {
       log(`[ERROR] ${error.message}`);
@@ -2196,9 +2814,19 @@ function wireEvents() {
   });
   els.restoreKey.addEventListener("click", () => {
     const key = selectedKey();
-    if (!key?.keyNumber) return;
-    const action = getAction(state.pristineProfile, state.layer, key.keyNumber);
-    setAction(state.profile, state.layer, key.keyNumber, action);
+    if (!key) return;
+    const pristineKey = (state.pristineLayout?.keys || []).find((item) => item.id === key.id);
+    const currentKeyNumber = key.keyNumber;
+    const pristineKeyNumber = pristineKey?.keyNumber;
+    if (currentKeyNumber) {
+      setAction(state.profile, state.layer, currentKeyNumber, { type: ACTION_TYPES.NONE, flags: 0, code: 0 });
+    }
+    if (pristineKeyNumber) {
+      const action = getAction(state.pristineProfile, state.layer, pristineKeyNumber);
+      setAction(state.profile, state.layer, pristineKeyNumber, action);
+    }
+    key.keyNumber = pristineKeyNumber || null;
+    key.ledIndex = pristineKey?.ledIndex ?? null;
     setDirty(true);
     renderAll();
   });
@@ -2222,30 +2850,54 @@ function wireEvents() {
     updateActionEditor();
     els.keyPickerDialog.showModal();
   });
+  els.previewLedIndex.addEventListener("click", async () => {
+    const key = selectedKey();
+    const ledIndex = sanitizeLedIndex(key?.ledIndex);
+    if (ledIndex == null) return;
+    const preset = selectedLightingPreset();
+    try {
+      const ret = await activeTransport().command(
+        COMMAND.PREVIEW_LED_INDEX,
+        ledIndexPreviewPayload(ledIndex, {
+          brightness: 100,
+          red: preset?.red ?? 255,
+          green: preset?.green ?? 255,
+          blue: preset?.blue ?? 255,
+        }),
+        1200,
+      );
+      if (ret.status !== 0) throw new Error(ret.statusText);
+      log(`[LIGHT] Preview LED ${ledIndex}`);
+    } catch (error) {
+      log(`[ERROR] ${error.message}`);
+    }
+  });
 
   for (const el of [els.ledEnabled, els.ledMode, els.brightness, els.ledColor, els.lightingAutoCycle]) {
     el.addEventListener("input", () => {
       els.brightnessOut.textContent = `${els.brightness.value}%`;
-      applyLightingToProfile();
-      renderKeyboard();
+      handleLightingControlInput();
     });
   }
+  els.lightingWebPreview.addEventListener("change", () => {
+    state.lightingWebPreview = els.lightingWebPreview.checked;
+    localStorage.setItem("ybk-light-preview", state.lightingWebPreview ? "1" : "0");
+    renderKeyboard();
+  });
   els.lightingCycleInterval.addEventListener("input", () => {
     els.lightingCycleInterval.value = String(clampCycleInterval(els.lightingCycleInterval.value));
-    applyLightingToProfile();
-    renderKeyboard();
+    handleLightingControlInput();
   });
   els.speed.addEventListener("input", () => {
     els.speedOut.textContent = String(els.speed.value);
-    applyLightingToProfile();
-    renderKeyboard();
+    handleLightingControlInput();
   });
 
   els.previewLight.addEventListener("click", async () => {
     try {
       applyLightingToProfile();
       if (isStaticLightingMode(selectedLightingPreset().mode)) {
-        const ret = await state.serial.command(
+        const ret = await activeTransport().command(
           COMMAND.PREVIEW_LIGHTING_PRESET,
           lightingPresetBytes(state.profile, state.lightingPresetIndex),
           1600,
@@ -2254,7 +2906,7 @@ function wireEvents() {
         log(state.lang === "zh" ? "[LIGHT] 已发送静态灯光预览到设备" : "[LIGHT] Static lighting preview sent");
         return;
       }
-      const ret = await state.serial.command(COMMAND.PREVIEW_LED, ledPreviewPayload(selectedLightingPreset()));
+      const ret = await activeTransport().command(COMMAND.PREVIEW_LED, ledPreviewPayload(selectedLightingPreset()));
       if (ret.status !== 0) throw new Error(ret.statusText);
       log("[LIGHT] Preview sent");
       if (Number(selectedLightingPreset().mode) === 7 || Number(selectedLightingPreset().mode) === 8) {
@@ -2277,6 +2929,22 @@ function wireEvents() {
     applyLightingToProfile();
     renderLighting();
     renderKeyboard();
+  });
+  els.addLightGroup.addEventListener("click", () => {
+    addLightingGroup();
+    log(state.lang === "zh" ? "[LIGHT] 已添加静态分组" : "[LIGHT] Static group added");
+  });
+  els.groupFillAll.addEventListener("click", () => {
+    const group = findLightingGroup(syncLightingGroupSelection());
+    if (!group) return;
+    applyLightingGroupToAllKeys(group);
+    log(state.lang === "zh" ? "[LIGHT] 已将当前分组应用到全部按键" : "[LIGHT] Current group applied to all keys");
+  });
+  els.groupClear.addEventListener("click", () => {
+    const group = findLightingGroup(syncLightingGroupSelection());
+    if (!group) return;
+    removeLightingGroup(group.id);
+    log(state.lang === "zh" ? "[LIGHT] 已清空当前分组" : "[LIGHT] Current group cleared");
   });
   els.staticSelectAll.addEventListener("click", () => {
     if (selectedLightingPreset().mode === 5) {
@@ -2344,6 +3012,7 @@ function wireEvents() {
     event.preventDefault();
     try {
       state.layout = parseKle(els.kleInput.value);
+      applyLightingTopologyToLayout(state.lightingTopology, state.layout);
       syncKeyboardName(state.layout.name);
       state.selectedKeyId = state.layout.keys[0]?.id || null;
       setDirty(true);
@@ -2361,13 +3030,33 @@ function wireEvents() {
     els.mapMode.classList.toggle("secondary", !state.mapMode);
     log(`[LAYOUT] Key number map mode ${state.mapMode ? "enabled" : "disabled"}`);
   });
+  els.ledMapMode.addEventListener("click", () => {
+    state.ledMapMode = !state.ledMapMode;
+    els.ledMapMode.classList.toggle("primary", state.ledMapMode);
+    els.ledMapMode.classList.toggle("secondary", !state.ledMapMode);
+    renderKeyboard();
+    log(`[LAYOUT] LED map mode ${state.ledMapMode ? "enabled" : "disabled"}`);
+  });
   els.keyboardNameInput.addEventListener("input", () => {
     syncKeyboardName(els.keyboardNameInput.value, false);
     setDirty(true);
     renderKeyboard();
   });
+  els.usbProductNameInput.addEventListener("input", () => {
+    syncUsbProductName(els.usbProductNameInput.value, false);
+    setDirty(true);
+    updateLayoutSource();
+    renderChangeList();
+  });
+  els.bleDeviceNameInput.addEventListener("input", () => {
+    syncBleDeviceName(els.bleDeviceNameInput.value, false);
+    setDirty(true);
+    updateLayoutSource();
+    renderChangeList();
+  });
   els.defaultLayout.addEventListener("click", () => {
     state.layout = defaultLayout();
+    applyLightingTopologyToLayout(state.lightingTopology, state.layout);
     syncKeyboardName(state.layout.name);
     state.selectedKeyId = state.layout.keys[0]?.id || null;
     setDirty(true);
@@ -2386,6 +3075,7 @@ function wireEvents() {
   els.exportJson.addEventListener("click", exportConfig);
   window.addEventListener("keydown", handleInputTestKeyDown);
   window.addEventListener("keyup", handleInputTestKeyUp);
+  window.addEventListener("resize", updateKeyboardScale);
   window.addEventListener("blur", clearInputTest);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) clearInputTest();

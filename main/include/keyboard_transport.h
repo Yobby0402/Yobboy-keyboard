@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "class/hid/hid_device.h"
+#include "keyboard_input.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,6 +23,8 @@ typedef struct {
     bool usb_suspended;
     bool usb_remote_wakeup_enabled;
     bool ble_connected;
+    bool ble_advertising;
+    bool ble_suspended;
 } keyboard_transport_status_t;
 
 esp_err_t keyboard_transport_init(void);
@@ -34,10 +37,11 @@ void keyboard_transport_notify_usb_unmount(void);
 void keyboard_transport_notify_usb_suspend(bool remote_wakeup_enabled);
 void keyboard_transport_notify_usb_resume(void);
 void keyboard_transport_notify_ble_connected(bool connected);
+void keyboard_transport_notify_ble_advertising(bool advertising);
+void keyboard_transport_notify_ble_suspend(bool suspended);
 
 bool keyboard_transport_request_remote_wakeup(void);
-bool keyboard_transport_send_keyboard_report(hid_keyboard_modifier_bm_t modifier,
-                                            const uint8_t keycodes[6]);
+bool keyboard_transport_send_keyboard_report(const keyboard_input_report_t *report);
 bool keyboard_transport_send_consumer_report(uint16_t usage_code);
 
 #ifdef __cplusplus

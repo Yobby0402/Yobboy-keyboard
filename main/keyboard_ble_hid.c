@@ -12,6 +12,8 @@
 #include "esp_hid_common.h"
 #include "esp_hidd.h"
 #include "esp_log.h"
+#include "keyboard_ble_config_service.h"
+#include "keyboard_layout_meta.h"
 #include "keyboard_transport.h"
 #include "usb_descriptors.h"
 
@@ -20,7 +22,7 @@ static const char *TAG = "keyboard_ble_hid";
 #define BLE_HID_VENDOR_ID     0x303A
 #define BLE_HID_PRODUCT_ID    0x4002
 #define BLE_HID_VERSION       0x0100
-#define BLE_HID_DEVICE_NAME   "Yobboy Keyboard BLE"
+static char s_ble_device_name[YBK_BLE_DEVICE_NAME_LEN] = "Yobboy Keyboard BLE";
 
 static esp_hidd_dev_t *s_hid_dev = NULL;
 static bool s_stack_ready = false;
@@ -87,12 +89,19 @@ static esp_hid_device_config_t s_ble_hid_config = {
     .vendor_id = BLE_HID_VENDOR_ID,
     .product_id = BLE_HID_PRODUCT_ID,
     .version = BLE_HID_VERSION,
-    .device_name = BLE_HID_DEVICE_NAME,
+    .device_name = s_ble_device_name,
     .manufacturer_name = CONFIG_TINYUSB_DESC_MANUFACTURER_STRING,
     .serial_number = CONFIG_TINYUSB_DESC_SERIAL_STRING,
     .report_maps = s_report_maps,
     .report_maps_len = 1,
 };
+
+static void init_ble_device_name(void)
+{
+    const keyboard_layout_meta_t *meta = keyboard_layout_meta_get();
+    strncpy(s_ble_device_name, meta->ble_device_name, sizeof(s_ble_device_name) - 1);
+    s_ble_device_name[sizeof(s_ble_device_name) - 1] = '\0';
+}
 
 static esp_err_t ble_start_advertising(void)
 {
@@ -129,8 +138,10 @@ static void ble_gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_p
         break;
     case ESP_GAP_BLE_ADV_START_COMPLETE_EVT:
         if (param->adv_start_cmpl.status == ESP_BT_STATUS_SUCCESS) {
+            keyboard_transport_notify_ble_advertising(true);
             ESP_LOGI(TAG, "BLE advertising started");
         } else {
+            keyboard_transport_notify_ble_advertising(false);
             ESP_LOGW(TAG, "BLE advertising start error: %d", param->adv_start_cmpl.status);
         }
         break;
@@ -167,24 +178,32 @@ static void ble_hidd_event_callback(void *handler_args, esp_event_base_t base, i
         break;
     case ESP_HIDD_CONNECT_EVENT:
         ESP_LOGI(TAG, "BLE HID connected");
+        keyboard_transport_notify_ble_advertising(false);
+        keyboard_transport_notify_ble_suspend(false);
         keyboard_transport_notify_ble_connected(true);
         if (param->connect.dev) {
             esp_hidd_dev_battery_set(param->connect.dev, 100);
         }
         break;
     case ESP_HIDD_DISCONNECT_EVENT:
-        ESP_LOGI(TAG, "BLE HID disconnected");
+        ESP_LOGI(TAG, "BLE HID disconnected: %s",
+                 esp_hid_disconnect_reason_str(ESP_HID_TRANSPORT_BLE, param->disconnect.reason));
+        keyboard_transport_notify_ble_suspend(false);
         keyboard_transport_notify_ble_connected(false);
         if (ble_start_advertising() != ESP_OK) {
             ESP_LOGW(TAG, "BLE advertising restart failed");
         }
         break;
     case ESP_HIDD_CONTROL_EVENT:
+        keyboard_transport_notify_ble_suspend(
+            param->control.control != ESP_HID_CONTROL_EXIT_SUSPEND);
         ESP_LOGI(TAG, "BLE HID control: %s",
                  param->control.control == ESP_HID_CONTROL_EXIT_SUSPEND ? "exit suspend" : "suspend");
         break;
     case ESP_HIDD_STOP_EVENT:
         ESP_LOGI(TAG, "BLE HID stopped");
+        keyboard_transport_notify_ble_advertising(false);
+        keyboard_transport_notify_ble_suspend(false);
         keyboard_transport_notify_ble_connected(false);
         break;
     default:
@@ -280,7 +299,7 @@ static esp_err_t ble_gap_configure(void)
         esp_ble_gap_set_security_param(ESP_BLE_SM_MAX_KEY_SIZE, &key_size, sizeof(key_size)),
         TAG,
         "set key size failed");
-    ESP_RETURN_ON_ERROR(esp_ble_gap_set_device_name(BLE_HID_DEVICE_NAME), TAG, "set device name failed");
+    ESP_RETURN_ON_ERROR(esp_ble_gap_set_device_name(s_ble_device_name), TAG, "set device name failed");
 
     s_adv_data_ready = false;
     s_adv_start_pending = false;
@@ -298,7 +317,9 @@ esp_err_t keyboard_ble_hid_init(void)
         s_stack_ready = true;
     }
 
+    init_ble_device_name();
     ESP_RETURN_ON_ERROR(ble_gap_configure(), TAG, "BLE GAP configure failed");
+    ESP_RETURN_ON_ERROR(keyboard_ble_config_service_init(), TAG, "BLE config service init failed");
     ESP_RETURN_ON_ERROR(
         esp_hidd_dev_init(&s_ble_hid_config, ESP_HID_TRANSPORT_BLE, ble_hidd_event_callback, &s_hid_dev),
         TAG,

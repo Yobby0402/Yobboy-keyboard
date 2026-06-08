@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "keyboard_lighting_topology.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -137,6 +138,8 @@ void keyboard_profile_lighting_tick(uint32_t elapsed_ms);
 void keyboard_profile_preview_lighting(uint8_t mode, bool enabled, uint8_t brightness, uint8_t speed,
                                        uint8_t red, uint8_t green, uint8_t blue);
 void keyboard_profile_preview_lighting_preset(const keyboard_lighting_preset_t *preset);
+void keyboard_profile_preview_led_index(uint16_t led_index, uint8_t brightness,
+                                        uint8_t red, uint8_t green, uint8_t blue);
 void keyboard_profile_note_pressed_keys(const int *pressed_pins, int num_pressed_pins);
 
 void keyboard_profile_set_led_enabled(bool enabled);

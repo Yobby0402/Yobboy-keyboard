@@ -33,6 +33,26 @@ static socd_pair_state_t s_socd_vertical = {0};
 static reverse_tap_pair_state_t s_reverse_tap_horizontal = {0};
 static reverse_tap_pair_state_t s_reverse_tap_vertical = {0};
 
+static bool keycode_in_nkro_range(uint8_t keycode)
+{
+    return keycode <= KEYBOARD_INPUT_NKRO_USAGE_MAX;
+}
+
+static void nkro_set_key(keyboard_input_report_t *report, uint8_t keycode, bool pressed)
+{
+    if (report == NULL || !keycode_in_nkro_range(keycode)) {
+        return;
+    }
+
+    uint8_t byte_index = keycode / 8;
+    uint8_t bit_mask = (uint8_t)(1u << (keycode % 8));
+    if (pressed) {
+        report->nkro_keys[byte_index] |= bit_mask;
+    } else {
+        report->nkro_keys[byte_index] &= (uint8_t)~bit_mask;
+    }
+}
+
 static bool resolve_fn_pressed(const int *pressed_pins, int num_pressed_pins)
 {
     for (int i = 0; i < num_pressed_pins; i++) {
@@ -68,8 +88,14 @@ static const keyboard_action_t *resolve_key_action(uint8_t key_num, bool fn_pres
 
 static bool report_has_keycode(const keyboard_input_report_t *report, uint8_t keycode)
 {
-    if (report == NULL) {
+    if (report == NULL || keycode == 0) {
         return false;
+    }
+
+    if (keycode_in_nkro_range(keycode)) {
+        uint8_t byte_index = keycode / 8;
+        uint8_t bit_mask = (uint8_t)(1u << (keycode % 8));
+        return (report->nkro_keys[byte_index] & bit_mask) != 0;
     }
 
     for (uint8_t i = 0; i < report->keycode_count; i++) {
@@ -95,6 +121,9 @@ static void report_remove_keycodes(keyboard_input_report_t *report, uint8_t firs
         report->keycodes[write_index++] = keycode;
     }
 
+    nkro_set_key(report, first, false);
+    nkro_set_key(report, second, false);
+
     uint8_t new_count = write_index;
     while (write_index < KEYBOARD_INPUT_MAX_KEYS) {
         report->keycodes[write_index++] = 0;
@@ -114,10 +143,12 @@ static void report_append_keycode(keyboard_input_report_t *report, uint8_t keyco
     }
 
     if (report->keycode_count >= KEYBOARD_INPUT_MAX_KEYS) {
+        nkro_set_key(report, keycode, true);
         return;
     }
 
     report->keycodes[report->keycode_count++] = keycode;
+    nkro_set_key(report, keycode, true);
 }
 
 static bool tick_has_elapsed(TickType_t now, TickType_t target)
@@ -355,9 +386,7 @@ void keyboard_input_build_report(const int *pressed_pins, int num_pressed_pins,
 
         switch (action->type) {
         case YBK_ACTION_KEY:
-            if (report->keycode_count < KEYBOARD_INPUT_MAX_KEYS) {
-                report->keycodes[report->keycode_count++] = (uint8_t)action->code;
-            }
+            report_append_keycode(report, (uint8_t)action->code);
             break;
         case YBK_ACTION_MODIFIER:
             report->modifier |= (hid_keyboard_modifier_bm_t)action->code;

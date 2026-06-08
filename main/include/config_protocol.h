@@ -1,6 +1,7 @@
 #ifndef _CONFIG_PROTOCOL_H_
 #define _CONFIG_PROTOCOL_H_
 
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 #include "keyboard_profile.h"
@@ -11,7 +12,7 @@ extern "C" {
 #endif
 
 #define YBK_CONFIG_MAGIC 0x314B4259u /* "YBK1" little-endian */
-#define YBK_CONFIG_PROTOCOL_VERSION 2
+#define YBK_CONFIG_PROTOCOL_VERSION 3
 
 typedef enum {
     YBK_CONFIG_CMD_GET_INFO = 0x01,
@@ -26,6 +27,9 @@ typedef enum {
     YBK_CONFIG_CMD_READ_KEY_STATE = 0x0A,
     YBK_CONFIG_CMD_READ_RUNTIME_STATE = 0x0B,
     YBK_CONFIG_CMD_PREVIEW_LIGHTING_PRESET = 0x0C,
+    YBK_CONFIG_CMD_READ_LIGHTING_TOPOLOGY = 0x0D,
+    YBK_CONFIG_CMD_WRITE_LIGHTING_TOPOLOGY = 0x0E,
+    YBK_CONFIG_CMD_PREVIEW_LED_INDEX = 0x0F,
     YBK_CONFIG_EVT_LOG = 0x70,
 } ybk_config_command_t;
 
@@ -79,7 +83,20 @@ typedef struct {
     uint32_t idle_ms;
 } __attribute__((packed)) ybk_config_runtime_state_t;
 
+typedef struct {
+    uint16_t led_index;
+    uint8_t brightness;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+} __attribute__((packed)) ybk_config_led_index_preview_t;
+
+typedef esp_err_t (*ybk_config_transport_write_fn_t)(const uint8_t *data, size_t len, void *ctx);
+
 esp_err_t config_protocol_start(tinyusb_cdcacm_itf_t cdc_itf);
+esp_err_t config_protocol_process_external_bytes(const uint8_t *data, size_t len,
+                                                 ybk_config_transport_write_fn_t write_fn,
+                                                 void *ctx);
 
 #ifdef __cplusplus
 }

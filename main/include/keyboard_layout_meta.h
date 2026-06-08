@@ -9,9 +9,11 @@ extern "C" {
 #endif
 
 #define YBK_LAYOUT_META_MAGIC 0x4C4B4259u /* "YBKL" little-endian */
-#define YBK_LAYOUT_META_VERSION 2
+#define YBK_LAYOUT_META_VERSION 3
 #define YBK_LAYOUT_ID_LEN 32
 #define YBK_KEYBOARD_NAME_LEN 32
+#define YBK_USB_PRODUCT_NAME_LEN 32
+#define YBK_BLE_DEVICE_NAME_LEN 32
 
 typedef struct {
     uint32_t magic;
@@ -20,6 +22,8 @@ typedef struct {
     char layout_id[YBK_LAYOUT_ID_LEN];
     char keyboard_name[YBK_KEYBOARD_NAME_LEN];
     uint32_t layout_hash;
+    char usb_product_name[YBK_USB_PRODUCT_NAME_LEN];
+    char ble_device_name[YBK_BLE_DEVICE_NAME_LEN];
 } __attribute__((packed)) keyboard_layout_meta_t;
 
 esp_err_t keyboard_layout_meta_init(void);

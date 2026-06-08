@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20260605f">
+  <link rel="stylesheet" href="./styles.css?v=20260608a">
 </head>
 <body>
   <header class="topbar">
@@ -28,6 +28,10 @@
         <span id="status-text">DISCONNECTED</span>
     </div>
     <div class="actions">
+      <select id="transport-select" class="topbar-select" aria-label="Transport">
+        <option value="serial">USB CDC</option>
+        <option value="bluetooth">BLE</option>
+      </select>
       <button class="secondary" id="btn-read" disabled><span class="material-symbols-outlined">download</span><span data-i18n="read">Read</span></button>
       <button class="secondary" id="btn-save" disabled><span class="material-symbols-outlined">save</span><span data-i18n="save">Save</span></button>
       <button class="secondary" id="btn-reboot" disabled data-i18n="reboot">Reboot</button>
@@ -65,11 +69,16 @@
         <div class="layout-source">
           <label data-i18n="keyboardName">KEYBOARD NAME</label>
           <input id="keyboard-name-input" type="text" maxlength="31" placeholder="My Keyboard">
+          <label data-i18n="usbProductName">USB PRODUCT NAME</label>
+          <input id="usb-product-name-input" type="text" maxlength="31" placeholder="Yobboy Keyboard">
+          <label data-i18n="bleDeviceName">BLE DEVICE NAME</label>
+          <input id="ble-device-name-input" type="text" maxlength="31" placeholder="Yobboy Keyboard BLE">
           <label data-i18n="layoutSource">LAYOUT SOURCE</label>
           <strong id="layout-source">Local Default</strong>
           <small id="layout-note" data-i18n="layoutNote">Device profile does not include visual layout data.</small>
         </div>
         <button class="secondary wide" id="btn-map-mode" data-i18n="mapMode">Key Number Map Mode</button>
+        <button class="outline wide" id="btn-led-map-mode" data-i18n="ledMapMode">LED Map Mode</button>
         <button class="outline wide" id="btn-default-layout" data-i18n="restoreDefaultLayout">Restore Default Layout</button>
       </section>
 
@@ -93,8 +102,10 @@
             <label><input type="checkbox" id="toggle-binding" checked> <span data-i18n="binding">Binding</span></label>
           </div>
         </div>
-        <div class="keyboard-scroll">
-          <div id="keyboard-canvas" class="keyboard-canvas"></div>
+        <div class="keyboard-scroll" id="keyboard-scroll">
+          <div class="keyboard-fit" id="keyboard-fit">
+            <div id="keyboard-canvas" class="keyboard-canvas"></div>
+          </div>
         </div>
         <div class="test-strip">
           <span class="material-symbols-outlined">keyboard_command_key</span>
@@ -165,8 +176,11 @@
 
         <label data-i18n="keyNumber">KEY NUMBER</label>
         <input id="key-number-input" type="number" min="0" max="79" placeholder="Unmapped">
+        <label data-i18n="ledIndex">LED INDEX</label>
+        <input id="led-index-input" type="number" min="0" max="70" placeholder="Unmapped">
 
         <div class="button-grid">
+          <button class="outline" id="btn-preview-led-index" type="button" data-i18n="previewLed">Preview LED</button>
           <button class="outline danger-text" id="btn-clear-key" data-i18n="clearKey">Clear Key</button>
           <button class="outline" id="btn-restore-key" data-i18n="restore">Restore</button>
           <button class="primary wide" id="btn-apply-binding" data-i18n="applyBinding">Apply Binding</button>
@@ -182,7 +196,10 @@
         <div class="lighting-stack-card lighting-editor-section">
         <div class="lighting-section-head">
           <label data-i18n="lightingPresets">LIGHTING CONFIGS</label>
-          <button class="secondary" id="btn-add-light-config" type="button" data-i18n="addLightingConfig">Add Config</button>
+          <div class="section-head-tools">
+            <button class="info-button" type="button" data-help-key="infoLightingConfigs" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+            <button class="secondary" id="btn-add-light-config" type="button" data-i18n="addLightingConfig">Add Config</button>
+          </div>
         </div>
         <div id="lighting-config-meta" class="lighting-config-meta"></div>
         <div id="lighting-preset-list" class="lighting-preset-list"></div>
@@ -190,17 +207,32 @@
         </div>
 
         <div class="lighting-stack-card lighting-editor-section lighting-editor-form">
-        <label data-i18n="selectedLightingConfig">SELECTED CONFIG</label>
+        <div class="field-heading">
+          <label data-i18n="selectedLightingConfig">SELECTED CONFIG</label>
+          <button class="info-button" type="button" data-help-key="infoLightingEditor" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+        </div>
         <div id="lighting-selected-meta" class="lighting-config-meta"></div>
-        <label class="checkbox-row"><input type="checkbox" id="lighting-auto-cycle"> <span data-i18n="lightingAutoCycle">Auto Cycle</span></label>
-        <small class="preview-note" data-i18n="lightingAutoCycleHint">When enabled, the keyboard lighting-switch key pauses or resumes cycling.</small>
+        <div class="toggle-row">
+          <label class="checkbox-row compact"><input type="checkbox" id="lighting-auto-cycle"> <span data-i18n="lightingAutoCycle">Auto Cycle</span></label>
+          <button class="info-button" type="button" data-help-key="infoLightingAutoCycle" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+        </div>
+        <div class="toggle-row">
+          <label class="checkbox-row compact"><input type="checkbox" id="lighting-web-preview"> <span data-i18n="webPreview">Web Preview</span></label>
+          <button class="info-button" type="button" data-help-key="infoWebPreview" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+        </div>
         <div class="lighting-cycle-grid">
           <div>
-            <label data-i18n="cycleInterval">CYCLE INTERVAL (S)</label>
+            <div class="field-heading">
+              <label data-i18n="cycleInterval">CYCLE INTERVAL (S)</label>
+              <button class="info-button" type="button" data-help-key="infoCycleInterval" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+            </div>
             <input id="lighting-cycle-interval" type="number" min="1" max="120" step="1" value="8">
           </div>
         </div>
-        <label data-i18n="effectMode">EFFECT MODE</label>
+        <div class="field-heading">
+          <label data-i18n="effectMode">EFFECT MODE</label>
+          <button class="info-button" type="button" data-help-key="infoEffectMode" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+        </div>
         <select id="led-mode">
           <option value="0">Windows HID</option>
           <option value="1">Solid</option>
@@ -213,22 +245,44 @@
           <option value="8">Ripple</option>
         </select>
         <div class="range-row">
-          <label data-i18n="brightness">BRIGHTNESS</label>
+          <div class="field-heading">
+            <label data-i18n="brightness">BRIGHTNESS</label>
+            <button class="info-button" type="button" data-help-key="infoBrightness" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+          </div>
           <output id="brightness-output">100%</output>
         </div>
         <input id="brightness-slider" type="range" min="0" max="100" value="100">
         <div class="range-row">
-          <label data-i18n="effectSpeed">EFFECT SPEED</label>
+          <div class="field-heading">
+            <label data-i18n="effectSpeed">EFFECT SPEED</label>
+            <button class="info-button" type="button" data-help-key="infoEffectSpeed" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+          </div>
           <output id="speed-output">50</output>
         </div>
         <input id="speed-slider" type="range" min="1" max="100" value="50">
-        <label data-i18n="rgbColor">RGB COLOR</label>
+        <div class="field-heading">
+          <label data-i18n="rgbColor">RGB COLOR</label>
+          <button class="info-button" type="button" data-help-key="infoRgbColor" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+        </div>
         <input id="led-color" type="color" value="#ffffff">
-        <small class="preview-note" id="light-preview-note" data-i18n="lightPreviewNote">Web preview follows the current lighting values.</small>
-        <small class="preview-note" data-i18n="lightingEditHint">In Group Static or Per-Key Static, click keys in the keyboard view to edit lighting.</small>
         <div id="lighting-static-actions" class="lighting-static-actions hidden">
           <button class="outline wide" id="btn-static-select-all" type="button">Select All Keys</button>
           <button class="outline wide" id="btn-static-clear-all" type="button">Clear All Keys</button>
+        </div>
+        <div id="lighting-group-editor" class="lighting-group-editor hidden">
+          <div class="lighting-section-head">
+            <label data-i18n="staticGroups">STATIC GROUPS</label>
+            <div class="section-head-tools">
+              <button class="info-button" type="button" data-help-key="infoStaticGroups" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+              <button class="secondary" id="btn-add-light-group" type="button" data-i18n="addGroup">Add Group</button>
+            </div>
+          </div>
+          <div id="lighting-group-meta" class="lighting-config-meta"></div>
+          <div id="lighting-group-list" class="lighting-group-list"></div>
+          <div class="lighting-group-actions">
+            <button class="outline wide" id="btn-group-fill-all" type="button" data-i18n="applyGroupToAll">Apply Group To All Keys</button>
+            <button class="outline wide" id="btn-group-clear" type="button" data-i18n="clearCurrentGroup">Clear Current Group</button>
+          </div>
         </div>
         <button class="outline wide" id="btn-preview-light" disabled data-i18n="previewLighting">Preview Lighting</button>
         <button class="outline wide" id="btn-activate-light" disabled data-i18n="setActivePreset">Set As Current</button>
@@ -241,18 +295,28 @@
         <div class="inspector-title">
           <div><span class="material-symbols-outlined accent-blue">bolt</span><strong data-i18n="powerModes">POWER MODES</strong></div>
         </div>
-        <label data-i18n="powerModeDefault">DEFAULT MODE</label>
+        <div class="field-heading">
+          <label data-i18n="powerModeDefault">DEFAULT MODE</label>
+          <button class="info-button" type="button" data-help-key="infoPowerModeDefault" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+        </div>
         <select id="power-mode-default"></select>
-        <label class="checkbox-row"><input type="checkbox" id="power-mode-cycle"> <span data-i18n="powerModeCycle">Allow Key Toggle</span></label>
+        <div class="toggle-row">
+          <label class="checkbox-row compact"><input type="checkbox" id="power-mode-cycle"> <span data-i18n="powerModeCycle">Allow Key Toggle</span></label>
+          <button class="info-button" type="button" data-help-key="infoPowerModeCycle" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+        </div>
 
         <div class="power-subsection">
-          <label data-i18n="socd">SOCD</label>
-          <p class="setting-description" data-i18n="socdDescription">Use SOCD when opposite directions may be held together. Example: hold A, then press D, and the output switches to D after the configured delay.</p>
-          <p class="setting-use-case" data-i18n="socdUseCase">Best for clean opposite-direction resolution while two keys are physically held.</p>
+          <div class="field-heading">
+            <label data-i18n="socd">SOCD</label>
+            <button class="info-button" type="button" data-help-key="infoSocd" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+          </div>
           <label class="checkbox-row"><input type="checkbox" id="socd-enabled"> <span data-i18n="socdEnable">Enable SOCD (WASD)</span></label>
           <div class="numeric-grid compact">
             <div>
-              <label data-i18n="socdDelay">TRIGGER DELAY (MS)</label>
+              <div class="field-heading">
+                <label data-i18n="socdDelay">TRIGGER DELAY (MS)</label>
+                <button class="info-button" type="button" data-help-key="infoSocdDelay" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+              </div>
               <input id="socd-delay-ms" type="number" min="0" max="50" step="1" value="10">
             </div>
           </div>
@@ -260,17 +324,24 @@
         </div>
 
         <div class="power-subsection">
-          <label data-i18n="reverseTap">REVERSE TAP ASSIST</label>
-          <p class="setting-description" data-i18n="reverseTapDescription">Use this for counter-strafe style release assist. Example: release W and the keyboard briefly taps S for the configured duration.</p>
-          <p class="setting-use-case" data-i18n="reverseTapUseCase">Best for FPS-style stop or counter-strafe behavior after releasing a movement key.</p>
+          <div class="field-heading">
+            <label data-i18n="reverseTap">REVERSE TAP ASSIST</label>
+            <button class="info-button" type="button" data-help-key="infoReverseTap" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+          </div>
           <label class="checkbox-row"><input type="checkbox" id="reverse-tap-enabled"> <span data-i18n="reverseTapEnable">Enable Reverse Tap (WASD)</span></label>
           <div class="numeric-grid">
             <div>
-              <label data-i18n="reverseTapDelay">TAP DELAY (MS)</label>
+              <div class="field-heading">
+                <label data-i18n="reverseTapDelay">TAP DELAY (MS)</label>
+                <button class="info-button" type="button" data-help-key="infoReverseTapDelay" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+              </div>
               <input id="reverse-tap-delay-ms" type="number" min="0" max="50" step="1" value="0">
             </div>
             <div>
-              <label data-i18n="reverseTapDuration">TAP DURATION (MS)</label>
+              <div class="field-heading">
+                <label data-i18n="reverseTapDuration">TAP DURATION (MS)</label>
+                <button class="info-button" type="button" data-help-key="infoReverseTapDuration" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+              </div>
               <input id="reverse-tap-duration-ms" type="number" min="0" max="50" step="1" value="12">
             </div>
           </div>
@@ -375,6 +446,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260605f"></script>
+  <script type="module" src="./app.js?v=20260608b"></script>
 </body>
 </html>

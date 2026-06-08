@@ -10,6 +10,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "hc165.h"
+#include "keyboard_lighting_topology.h"
 #include "keyboard_layout_meta.h"
 #include "keyboard_power_policy.h"
 #include "keyboard_profile.h"
@@ -27,6 +28,8 @@ static const char *TAG = "config_protocol";
 static tinyusb_cdcacm_itf_t s_cdc_itf = TINYUSB_CDC_ACM_1;
 static uint8_t s_rx_buf[CONFIG_PROTOCOL_RX_BUF_SIZE];
 static size_t s_rx_len = 0;
+static uint8_t s_external_rx_buf[CONFIG_PROTOCOL_RX_BUF_SIZE];
+static size_t s_external_rx_len = 0;
 static SemaphoreHandle_t s_tx_lock = NULL;
 static vprintf_like_t s_original_vprintf = NULL;
 static bool s_log_forward_enabled = false;
@@ -74,9 +77,25 @@ static ybk_config_status_t status_from_esp_err(esp_err_t err, bool profile_error
     return YBK_CONFIG_STATUS_STORAGE_ERROR;
 }
 
-static esp_err_t send_frame(uint8_t type, uint8_t seq, const uint8_t *payload, uint16_t payload_len)
+static esp_err_t cdc_write_bytes(const uint8_t *data, size_t len, void *ctx)
 {
-    if (payload_len > CONFIG_PROTOCOL_MAX_PAYLOAD) {
+    (void)ctx;
+    if (s_tx_lock != NULL) {
+        xSemaphoreTake(s_tx_lock, portMAX_DELAY);
+    }
+    tinyusb_cdcacm_write_queue(s_cdc_itf, data, len);
+    esp_err_t ret = tinyusb_cdcacm_write_flush(s_cdc_itf, pdMS_TO_TICKS(100));
+    if (s_tx_lock != NULL) {
+        xSemaphoreGive(s_tx_lock);
+    }
+    return ret;
+}
+
+static esp_err_t send_frame_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
+                                uint8_t type, uint8_t seq,
+                                const uint8_t *payload, uint16_t payload_len)
+{
+    if (write_fn == NULL || payload_len > CONFIG_PROTOCOL_MAX_PAYLOAD) {
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -101,19 +120,17 @@ static esp_err_t send_frame(uint8_t type, uint8_t seq, const uint8_t *payload, u
     write_u32_le(tx_buf + offset, checksum);
     offset += sizeof(checksum);
 
-    if (s_tx_lock != NULL) {
-        xSemaphoreTake(s_tx_lock, portMAX_DELAY);
-    }
-    tinyusb_cdcacm_write_queue(s_cdc_itf, tx_buf, offset);
-    esp_err_t ret = tinyusb_cdcacm_write_flush(s_cdc_itf, pdMS_TO_TICKS(100));
-    if (s_tx_lock != NULL) {
-        xSemaphoreGive(s_tx_lock);
-    }
-    return ret;
+    return write_fn(tx_buf, offset, ctx);
 }
 
-static esp_err_t send_response(uint8_t command, uint8_t seq, ybk_config_status_t status,
-                               const uint8_t *payload, uint16_t payload_len)
+static esp_err_t send_frame(uint8_t type, uint8_t seq, const uint8_t *payload, uint16_t payload_len)
+{
+    return send_frame_via(cdc_write_bytes, NULL, type, seq, payload, payload_len);
+}
+
+static esp_err_t send_response_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
+                                   uint8_t command, uint8_t seq, ybk_config_status_t status,
+                                   const uint8_t *payload, uint16_t payload_len)
 {
     uint8_t response_payload[1 + CONFIG_PROTOCOL_MAX_PAYLOAD];
 
@@ -126,8 +143,20 @@ static esp_err_t send_response(uint8_t command, uint8_t seq, ybk_config_status_t
         memcpy(response_payload + 1, payload, payload_len);
     }
 
-    return send_frame(CONFIG_PROTOCOL_RESPONSE_TYPE(command), seq,
-                      response_payload, (uint16_t)(payload_len + 1));
+    return send_frame_via(write_fn, ctx, CONFIG_PROTOCOL_RESPONSE_TYPE(command), seq,
+                          response_payload, (uint16_t)(payload_len + 1));
+}
+
+static esp_err_t send_response(uint8_t command, uint8_t seq, ybk_config_status_t status,
+                               const uint8_t *payload, uint16_t payload_len)
+{
+    return send_response_via(cdc_write_bytes, NULL, command, seq, status, payload, payload_len);
+}
+
+static esp_err_t send_simple_response_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
+                                          uint8_t command, uint8_t seq, ybk_config_status_t status)
+{
+    return send_response_via(write_fn, ctx, command, seq, status, NULL, 0);
 }
 
 static esp_err_t send_simple_response(uint8_t command, uint8_t seq, ybk_config_status_t status)
@@ -146,7 +175,8 @@ static void fill_info(ybk_config_info_t *info)
     info->active_profile_checksum = keyboard_profile_get_checksum();
 }
 
-static void send_key_state(uint8_t command, uint8_t seq)
+static void send_key_state_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
+                               uint8_t command, uint8_t seq)
 {
     int pressed_pins[NUM_PRESSED_PINS_MAX] = {0};
     int count = get_pressed_pin(pressed_pins);
@@ -164,10 +194,17 @@ static void send_key_state(uint8_t command, uint8_t seq)
         state.keys[i] = (uint8_t)pressed_pins[i];
     }
 
-    send_response(command, seq, YBK_CONFIG_STATUS_OK, (const uint8_t *)&state, sizeof(state));
+    send_response_via(write_fn, ctx, command, seq,
+                      YBK_CONFIG_STATUS_OK, (const uint8_t *)&state, sizeof(state));
 }
 
-static void send_runtime_state(uint8_t command, uint8_t seq)
+static void send_key_state(uint8_t command, uint8_t seq)
+{
+    send_key_state_via(cdc_write_bytes, NULL, command, seq);
+}
+
+static void send_runtime_state_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
+                                   uint8_t command, uint8_t seq)
 {
     const keyboard_power_policy_status_t *status = keyboard_power_policy_get_status();
     ybk_config_runtime_state_t state = {
@@ -178,7 +215,13 @@ static void send_runtime_state(uint8_t command, uint8_t seq)
         .idle_ms = status->idle_ms,
     };
 
-    send_response(command, seq, YBK_CONFIG_STATUS_OK, (const uint8_t *)&state, sizeof(state));
+    send_response_via(write_fn, ctx, command, seq,
+                      YBK_CONFIG_STATUS_OK, (const uint8_t *)&state, sizeof(state));
+}
+
+static void send_runtime_state(uint8_t command, uint8_t seq)
+{
+    send_runtime_state_via(cdc_write_bytes, NULL, command, seq);
 }
 
 static int config_log_vprintf(const char *fmt, va_list args)
@@ -209,69 +252,73 @@ static int config_log_vprintf(const char *fmt, va_list args)
     return ret;
 }
 
-static void handle_command(uint8_t command, uint8_t seq, const uint8_t *payload, uint16_t len)
+static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
+                               uint8_t command, uint8_t seq,
+                               const uint8_t *payload, uint16_t len)
 {
     switch (command) {
     case YBK_CONFIG_CMD_GET_INFO: {
         if (len != 0) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
         ybk_config_info_t info = {0};
         fill_info(&info);
-        send_response(command, seq, YBK_CONFIG_STATUS_OK, (const uint8_t *)&info, sizeof(info));
+        send_response_via(write_fn, ctx, command, seq,
+                          YBK_CONFIG_STATUS_OK, (const uint8_t *)&info, sizeof(info));
         break;
     }
 
     case YBK_CONFIG_CMD_READ_PROFILE: {
         if (len != 0) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
         const keyboard_profile_t *profile = keyboard_profile_get();
-        send_response(command, seq, YBK_CONFIG_STATUS_OK,
-                      (const uint8_t *)profile, sizeof(*profile));
+        send_response_via(write_fn, ctx, command, seq,
+                          YBK_CONFIG_STATUS_OK, (const uint8_t *)profile, sizeof(*profile));
         break;
     }
 
     case YBK_CONFIG_CMD_WRITE_PROFILE: {
         if (len != sizeof(keyboard_profile_t)) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
         esp_err_t ret = keyboard_profile_stage(payload, len);
-        send_simple_response(command, seq, status_from_esp_err(ret, true));
+        send_simple_response_via(write_fn, ctx, command, seq, status_from_esp_err(ret, true));
         break;
     }
 
     case YBK_CONFIG_CMD_COMMIT_PROFILE: {
         if (len != 0) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
         esp_err_t ret = keyboard_profile_commit_staged();
-        send_simple_response(command, seq, status_from_esp_err(ret, ret == ESP_ERR_INVALID_STATE));
+        send_simple_response_via(write_fn, ctx, command, seq,
+                                 status_from_esp_err(ret, ret == ESP_ERR_INVALID_STATE));
         break;
     }
 
     case YBK_CONFIG_CMD_RESET_PROFILE: {
         if (len != 0) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
         esp_err_t ret = keyboard_profile_reset_default();
-        send_simple_response(command, seq, status_from_esp_err(ret, false));
+        send_simple_response_via(write_fn, ctx, command, seq, status_from_esp_err(ret, false));
         break;
     }
 
     case YBK_CONFIG_CMD_PREVIEW_LED: {
         if (len != sizeof(ybk_config_led_preview_t)) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
@@ -284,129 +331,183 @@ static void handle_command(uint8_t command, uint8_t seq, const uint8_t *payload,
                                           preview.red,
                                           preview.green,
                                           preview.blue);
-        send_simple_response(command, seq, YBK_CONFIG_STATUS_OK);
+        send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_OK);
         break;
     }
 
     case YBK_CONFIG_CMD_PREVIEW_LIGHTING_PRESET: {
         if (len != sizeof(keyboard_lighting_preset_t)) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
         keyboard_lighting_preset_t preset;
         memcpy(&preset, payload, sizeof(preset));
         keyboard_profile_preview_lighting_preset(&preset);
-        send_simple_response(command, seq, YBK_CONFIG_STATUS_OK);
+        send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_OK);
+        break;
+    }
+
+    case YBK_CONFIG_CMD_READ_LIGHTING_TOPOLOGY: {
+        if (len != 0) {
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            return;
+        }
+
+        const keyboard_lighting_topology_t *topology = keyboard_lighting_topology_get();
+        send_response_via(write_fn, ctx, command, seq,
+                          YBK_CONFIG_STATUS_OK, (const uint8_t *)topology, sizeof(*topology));
+        break;
+    }
+
+    case YBK_CONFIG_CMD_WRITE_LIGHTING_TOPOLOGY: {
+        if (len != sizeof(keyboard_lighting_topology_t)) {
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            return;
+        }
+
+        keyboard_lighting_topology_t topology;
+        memcpy(&topology, payload, sizeof(topology));
+        esp_err_t ret = keyboard_lighting_topology_set(&topology);
+        if (ret == ESP_OK) {
+            keyboard_profile_apply_lighting_runtime();
+        }
+        send_simple_response_via(write_fn, ctx, command, seq,
+                                 status_from_esp_err(ret, ret == ESP_ERR_INVALID_ARG));
+        break;
+    }
+
+    case YBK_CONFIG_CMD_PREVIEW_LED_INDEX: {
+        if (len != sizeof(ybk_config_led_index_preview_t)) {
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            return;
+        }
+
+        ybk_config_led_index_preview_t preview;
+        memcpy(&preview, payload, sizeof(preview));
+        keyboard_profile_preview_led_index(preview.led_index,
+                                           preview.brightness,
+                                           preview.red,
+                                           preview.green,
+                                           preview.blue);
+        send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_OK);
         break;
     }
 
     case YBK_CONFIG_CMD_REBOOT:
         if (len != 0) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
-        send_simple_response(command, seq, YBK_CONFIG_STATUS_OK);
+        send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_OK);
         vTaskDelay(pdMS_TO_TICKS(100));
         esp_restart();
         break;
 
     case YBK_CONFIG_CMD_READ_LAYOUT_META: {
         if (len != 0) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
         const keyboard_layout_meta_t *meta = keyboard_layout_meta_get();
-        send_response(command, seq, YBK_CONFIG_STATUS_OK,
-                      (const uint8_t *)meta, sizeof(*meta));
+        send_response_via(write_fn, ctx, command, seq,
+                          YBK_CONFIG_STATUS_OK, (const uint8_t *)meta, sizeof(*meta));
         break;
     }
 
     case YBK_CONFIG_CMD_WRITE_LAYOUT_META: {
         if (len != sizeof(keyboard_layout_meta_t)) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
         keyboard_layout_meta_t meta;
         memcpy(&meta, payload, sizeof(meta));
         esp_err_t ret = keyboard_layout_meta_set(&meta);
-        send_simple_response(command, seq, status_from_esp_err(ret, ret == ESP_ERR_INVALID_ARG));
+        send_simple_response_via(write_fn, ctx, command, seq,
+                                 status_from_esp_err(ret, ret == ESP_ERR_INVALID_ARG));
         break;
     }
 
     case YBK_CONFIG_CMD_READ_KEY_STATE:
         if (len != 0) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
-        send_key_state(command, seq);
+        send_key_state_via(write_fn, ctx, command, seq);
         break;
 
     case YBK_CONFIG_CMD_READ_RUNTIME_STATE:
         if (len != 0) {
-            send_simple_response(command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
             return;
         }
 
-        send_runtime_state(command, seq);
+        send_runtime_state_via(write_fn, ctx, command, seq);
         break;
 
     default:
-        send_simple_response(command, seq, YBK_CONFIG_STATUS_UNKNOWN_CMD);
+        send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_UNKNOWN_CMD);
         break;
     }
 }
 
-static void discard_rx_bytes(size_t count)
+static void handle_command(uint8_t command, uint8_t seq, const uint8_t *payload, uint16_t len)
 {
-    if (count >= s_rx_len) {
-        s_rx_len = 0;
+    handle_command_via(cdc_write_bytes, NULL, command, seq, payload, len);
+}
+
+static void discard_rx_bytes(uint8_t *rx_buf, size_t *rx_len, size_t count)
+{
+    if (count >= *rx_len) {
+        *rx_len = 0;
         return;
     }
 
-    memmove(s_rx_buf, s_rx_buf + count, s_rx_len - count);
-    s_rx_len -= count;
+    memmove(rx_buf, rx_buf + count, *rx_len - count);
+    *rx_len -= count;
 }
 
-static void process_rx_buffer(void)
+static void process_rx_buffer_via(uint8_t *rx_buf, size_t *rx_len,
+                                  ybk_config_transport_write_fn_t write_fn, void *ctx)
 {
-    while (s_rx_len >= sizeof(ybk_config_frame_header_t)) {
+    while (*rx_len >= sizeof(ybk_config_frame_header_t)) {
         ybk_config_frame_header_t header;
-        memcpy(&header, s_rx_buf, sizeof(header));
+        memcpy(&header, rx_buf, sizeof(header));
 
         if (header.magic != YBK_CONFIG_MAGIC) {
-            discard_rx_bytes(1);
+            discard_rx_bytes(rx_buf, rx_len, 1);
             continue;
         }
 
         if (header.len > CONFIG_PROTOCOL_MAX_PAYLOAD) {
             ESP_LOGW(TAG, "Dropping oversized frame: %u", header.len);
-            discard_rx_bytes(1);
+            discard_rx_bytes(rx_buf, rx_len, 1);
             continue;
         }
 
         size_t frame_len = sizeof(header) + header.len + sizeof(uint32_t);
-        if (s_rx_len < frame_len) {
+        if (*rx_len < frame_len) {
             return;
         }
 
-        const uint8_t *checksum_ptr = s_rx_buf + sizeof(header) + header.len;
+        const uint8_t *checksum_ptr = rx_buf + sizeof(header) + header.len;
         uint32_t received_checksum = read_u32_le(checksum_ptr);
-        uint32_t calculated_checksum = frame_checksum(s_rx_buf, sizeof(header) + header.len);
+        uint32_t calculated_checksum = frame_checksum(rx_buf, sizeof(header) + header.len);
 
         if (received_checksum == calculated_checksum) {
-            handle_command(header.type, header.seq,
-                           s_rx_buf + sizeof(header), header.len);
+            handle_command_via(write_fn, ctx, header.type, header.seq,
+                               rx_buf + sizeof(header), header.len);
         } else {
             ESP_LOGW(TAG, "Bad config frame checksum: cmd=0x%02x", header.type);
-            send_simple_response(header.type, header.seq, YBK_CONFIG_STATUS_BAD_CHECKSUM);
+            send_simple_response_via(write_fn, ctx, header.type, header.seq,
+                                     YBK_CONFIG_STATUS_BAD_CHECKSUM);
         }
 
-        discard_rx_bytes(frame_len);
+        discard_rx_bytes(rx_buf, rx_len, frame_len);
     }
 }
 
@@ -427,7 +528,7 @@ static void config_protocol_task(void *arg)
             } else {
                 memcpy(s_rx_buf + s_rx_len, read_buf, rx_size);
                 s_rx_len += rx_size;
-                process_rx_buffer();
+                process_rx_buffer_via(s_rx_buf, &s_rx_len, cdc_write_bytes, NULL);
             }
         }
 
@@ -454,4 +555,25 @@ esp_err_t config_protocol_start(tinyusb_cdcacm_itf_t cdc_itf)
                                       CONFIG_PROTOCOL_TASK_PRIORITY,
                                       NULL);
     return (task_ret == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
+}
+
+esp_err_t config_protocol_process_external_bytes(const uint8_t *data, size_t len,
+                                                 ybk_config_transport_write_fn_t write_fn,
+                                                 void *ctx)
+{
+    if (data == NULL || len == 0 || write_fn == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (len > sizeof(s_external_rx_buf)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    if (s_external_rx_len + len > sizeof(s_external_rx_buf)) {
+        ESP_LOGW(TAG, "External RX buffer overflow, clearing parser state");
+        s_external_rx_len = 0;
+    }
+
+    memcpy(s_external_rx_buf + s_external_rx_len, data, len);
+    s_external_rx_len += len;
+    process_rx_buffer_via(s_external_rx_buf, &s_external_rx_len, write_fn, ctx);
+    return ESP_OK;
 }

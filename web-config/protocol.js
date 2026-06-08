@@ -29,19 +29,49 @@ export const COMMAND = {
   READ_KEY_STATE: 0x0A,
   READ_RUNTIME_STATE: 0x0B,
   PREVIEW_LIGHTING_PRESET: 0x0C,
+  READ_LIGHTING_TOPOLOGY: 0x0D,
+  WRITE_LIGHTING_TOPOLOGY: 0x0E,
+  PREVIEW_LED_INDEX: 0x0F,
 };
 
 export const EVENT = {
   LOG: 0x70,
 };
 
+export const BLE = {
+  SERVICE_UUID: "18f08b8e-a41d-4f5e-b0f2-1111c0de0001",
+  STATUS_UUID: "18f08b8e-a41d-4f5e-b0f2-1111c0de0002",
+  RX_UUID: "18f08b8e-a41d-4f5e-b0f2-1111c0de0003",
+  TX_UUID: "18f08b8e-a41d-4f5e-b0f2-1111c0de0004",
+  CHUNK_SIZE: 180,
+};
+
+function toUint8Array(viewLike) {
+  if (viewLike instanceof Uint8Array) {
+    return new Uint8Array(viewLike);
+  }
+  return new Uint8Array(viewLike.buffer, viewLike.byteOffset || 0, viewLike.byteLength || 0);
+}
+
 export const LAYOUT_META = {
   MAGIC: 0x4C4B4259,
-  VERSION: 2,
-  SIZE: 76,
+  VERSION: 3,
+  SIZE: 140,
   ID_LEN: 32,
   NAME_LEN: 32,
+  USB_PRODUCT_NAME_LEN: 32,
+  BLE_DEVICE_NAME_LEN: 32,
   V1_SIZE: 44,
+  V2_SIZE: 76,
+};
+
+export const LIGHTING_TOPOLOGY = {
+  MAGIC: 0x544C4259,
+  VERSION: 1,
+  MAX_LAMPS: 80,
+  ACTIVE_LAMPS: 71,
+  SIZE: 1050,
+  NO_KEY: 0xff,
 };
 
 export const STATUS = {
@@ -84,58 +114,36 @@ function frame(type, seq, payload = new Uint8Array()) {
   return out;
 }
 
-export class YbkSerial {
+class YbkFrameTransport {
   constructor(log = () => {}) {
     this.log = log;
-    this.port = null;
-    this.reader = null;
-    this.writer = null;
     this.seq = 1;
     this.rx = new Uint8Array();
     this.pending = new Map();
+    this._connected = false;
   }
 
   get connected() {
-    return Boolean(this.port && this.writer);
+    return this._connected;
   }
 
-  async connect() {
-    if (!("serial" in navigator)) {
-      throw new Error("WebSerial is not available in this browser");
-    }
-    this.port = await navigator.serial.requestPort();
-    await this.port.open({ baudRate: 115200 });
-    this.reader = this.port.readable.getReader();
-    this.writer = this.port.writable.getWriter();
-    this.readLoop();
+  resetSession() {
+    this.seq = 1;
+    this.rx = new Uint8Array();
+    this.rejectPending(new Error("Transport disconnected"));
   }
 
-  async disconnect() {
-    try {
-      await this.reader?.cancel();
-      this.reader?.releaseLock();
-      this.writer?.releaseLock();
-      await this.port?.close();
-    } finally {
-      this.reader = null;
-      this.writer = null;
-      this.port = null;
+  rejectPending(error) {
+    for (const pending of this.pending.values()) {
+      pending.reject(error);
     }
+    this.pending.clear();
   }
 
-  async readLoop() {
-    try {
-      while (this.reader) {
-        const { value, done } = await this.reader.read();
-        if (done) break;
-        if (value) {
-          this.rx = concatBytes(this.rx, value);
-          this.parseFrames();
-        }
-      }
-    } catch (error) {
-      this.log(`[SERIAL] ${error.message}`);
-    }
+  onBytes(value) {
+    if (!value?.length) return;
+    this.rx = concatBytes(this.rx, value);
+    this.parseFrames();
   }
 
   parseFrames() {
@@ -178,7 +186,7 @@ export class YbkSerial {
   }
 
   async command(type, payload = new Uint8Array(), timeoutMs = 1600) {
-    if (!this.writer) throw new Error("Device is not connected");
+    if (!this.connected) throw new Error("Device is not connected");
     const seq = this.seq++ & 0xff;
     const responseType = type | 0x80;
     const key = `${responseType}:${seq}`;
@@ -192,9 +200,13 @@ export class YbkSerial {
           clearTimeout(timer);
           resolve(payloadBytes);
         },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
       });
     });
-    await this.writer.write(frame(type, seq, payload));
+    await this.writeFrame(frame(type, seq, payload));
     const response = await wait;
     const status = response[0] ?? 0xff;
     return {
@@ -202,6 +214,169 @@ export class YbkSerial {
       statusText: STATUS[status] || `STATUS_${status}`,
       data: response.subarray(1),
     };
+  }
+}
+
+export class YbkSerial extends YbkFrameTransport {
+  constructor(log = () => {}) {
+    super(log);
+    this.port = null;
+    this.reader = null;
+    this.writer = null;
+  }
+
+  async connect() {
+    if (!("serial" in navigator)) {
+      throw new Error("WebSerial is not available in this browser");
+    }
+    this.port = await navigator.serial.requestPort();
+    await this.port.open({ baudRate: 115200 });
+    this.reader = this.port.readable.getReader();
+    this.writer = this.port.writable.getWriter();
+    this._connected = true;
+    this.readLoop();
+  }
+
+  async disconnect() {
+    this._connected = false;
+    this.resetSession();
+    try {
+      await this.reader?.cancel();
+      this.reader?.releaseLock();
+      this.writer?.releaseLock();
+      await this.port?.close();
+    } finally {
+      this.reader = null;
+      this.writer = null;
+      this.port = null;
+    }
+  }
+
+  async readLoop() {
+    try {
+      while (this.reader) {
+        const { value, done } = await this.reader.read();
+        if (done) break;
+        this.onBytes(value);
+      }
+    } catch (error) {
+      this.log(`[SERIAL] ${error.message}`);
+    } finally {
+      this._connected = false;
+      this.resetSession();
+    }
+  }
+
+  async writeFrame(data) {
+    if (!this.writer) throw new Error("Device is not connected");
+    await this.writer.write(data);
+  }
+}
+
+export function decodeBleStatus(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < 16) {
+    return null;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return {
+    protocolVersion: bytes[0],
+    activeTransport: bytes[1],
+    currentMode: bytes[2],
+    activeScanIntervalMs: bytes[3],
+    flags: bytes[4],
+    profileChecksum: view.getUint32(8, true),
+    idleMs: view.getUint32(12, true),
+  };
+}
+
+export class YbkBluetooth extends YbkFrameTransport {
+  constructor(log = () => {}) {
+    super(log);
+    this.device = null;
+    this.server = null;
+    this.service = null;
+    this.statusChar = null;
+    this.rxChar = null;
+    this.txChar = null;
+    this.lastStatus = null;
+    this.onStatus = null;
+    this._onTx = (event) => {
+      this.onBytes(toUint8Array(event.target.value));
+    };
+    this._onStatus = (event) => {
+      this.lastStatus = decodeBleStatus(toUint8Array(event.target.value));
+      this.onStatus?.(this.lastStatus);
+    };
+    this._onDisconnected = () => {
+      this._connected = false;
+      this.resetSession();
+      this.log("[BLE] Disconnected");
+    };
+  }
+
+  async connect() {
+    if (!("bluetooth" in navigator)) {
+      throw new Error("Web Bluetooth is not available in this browser");
+    }
+    this.device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [BLE.SERVICE_UUID] }],
+      optionalServices: [BLE.SERVICE_UUID],
+    });
+    this.device.addEventListener("gattserverdisconnected", this._onDisconnected);
+    this.server = await this.device.gatt.connect();
+    this.service = await this.server.getPrimaryService(BLE.SERVICE_UUID);
+    [this.statusChar, this.rxChar, this.txChar] = await Promise.all([
+      this.service.getCharacteristic(BLE.STATUS_UUID),
+      this.service.getCharacteristic(BLE.RX_UUID),
+      this.service.getCharacteristic(BLE.TX_UUID),
+    ]);
+
+    this.txChar.addEventListener("characteristicvaluechanged", this._onTx);
+    await this.txChar.startNotifications();
+    this.statusChar.addEventListener("characteristicvaluechanged", this._onStatus);
+    await this.statusChar.startNotifications();
+    this.lastStatus = decodeBleStatus(toUint8Array(await this.statusChar.readValue()));
+    this.onStatus?.(this.lastStatus);
+    this._connected = true;
+  }
+
+  async disconnect() {
+    this._connected = false;
+    this.resetSession();
+    try {
+      await this.txChar?.stopNotifications?.();
+      await this.statusChar?.stopNotifications?.();
+    } catch {
+      // ignore
+    }
+    this.txChar?.removeEventListener("characteristicvaluechanged", this._onTx);
+    this.statusChar?.removeEventListener("characteristicvaluechanged", this._onStatus);
+    if (this.device) {
+      this.device.removeEventListener("gattserverdisconnected", this._onDisconnected);
+    }
+    if (this.server?.connected) {
+      this.server.disconnect();
+    }
+    this.device = null;
+    this.server = null;
+    this.service = null;
+    this.statusChar = null;
+    this.rxChar = null;
+    this.txChar = null;
+    this.lastStatus = null;
+    this.onStatus?.(null);
+  }
+
+  async writeFrame(data) {
+    if (!this.rxChar) throw new Error("BLE config service is not connected");
+    for (let offset = 0; offset < data.length; offset += BLE.CHUNK_SIZE) {
+      const chunk = data.slice(offset, offset + BLE.CHUNK_SIZE);
+      if (typeof this.rxChar.writeValueWithoutResponse === "function") {
+        await this.rxChar.writeValueWithoutResponse(chunk);
+      } else {
+        await this.rxChar.writeValue(chunk);
+      }
+    }
   }
 }
 
@@ -214,8 +389,8 @@ export function createEmptyProfile() {
   bytes[PROFILE.LED_OFFSET] = 0;
   setLightingAutoCycleEnabled(bytes, false);
   setLightingPreset(bytes, 0, { enabled: false, mode: 1, brightness: 100, speed: 50, red: 255, green: 255, blue: 255, cycleIntervalSec: 8 });
-  setLightingPreset(bytes, 1, { enabled: true, mode: 1, brightness: 100, speed: 50, red: 255, green: 255, blue: 255, cycleIntervalSec: 8 });
-  setLightingPreset(bytes, 2, { enabled: true, mode: 2, brightness: 80, speed: 35, red: 80, green: 220, blue: 255, cycleIntervalSec: 10 });
+  setLightingPreset(bytes, 1, { enabled: false, mode: 1, brightness: 100, speed: 50, red: 255, green: 255, blue: 255, cycleIntervalSec: 8 });
+  setLightingPreset(bytes, 2, { enabled: false, mode: 2, brightness: 80, speed: 35, red: 80, green: 220, blue: 255, cycleIntervalSec: 10 });
   setLightingPreset(bytes, 3, { enabled: false, mode: 4, brightness: 100, speed: 35, red: 80, green: 120, blue: 255, cycleIntervalSec: 8 });
   setLightingPreset(bytes, 4, { enabled: false, mode: 3, brightness: 100, speed: 40, red: 255, green: 255, blue: 255, cycleIntervalSec: 8 });
   setLightingPreset(bytes, 5, { enabled: false, mode: 0, brightness: 100, speed: 50, red: 255, green: 255, blue: 255, cycleIntervalSec: 8 });
@@ -462,6 +637,17 @@ export function ledPreviewPayload(lighting) {
   ]);
 }
 
+export function ledIndexPreviewPayload(ledIndex, color) {
+  const bytes = new Uint8Array(6);
+  const view = new DataView(bytes.buffer);
+  view.setUint16(0, Math.max(0, Number(ledIndex) || 0), true);
+  bytes[2] = Math.max(0, Math.min(100, Number(color?.brightness ?? 100)));
+  bytes[3] = Number(color?.red || 0);
+  bytes[4] = Number(color?.green || 0);
+  bytes[5] = Number(color?.blue || 0);
+  return bytes;
+}
+
 export function decodeKeyState(bytes) {
   if (!(bytes instanceof Uint8Array) || bytes.length < 1) {
     return [];
@@ -484,18 +670,93 @@ export function decodeRuntimeState(bytes) {
   };
 }
 
-export function encodeLayoutMeta(layoutId, layoutHash, keyboardName) {
+export function encodeLightingTopology(layout) {
+  const bytes = new Uint8Array(LIGHTING_TOPOLOGY.SIZE);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, LIGHTING_TOPOLOGY.MAGIC, true);
+  view.setUint16(4, LIGHTING_TOPOLOGY.VERSION, true);
+  view.setUint16(6, LIGHTING_TOPOLOGY.SIZE, true);
+  view.setUint16(8, LIGHTING_TOPOLOGY.ACTIVE_LAMPS, true);
+  view.setUint16(10, 0, true);
+  bytes.fill(LIGHTING_TOPOLOGY.NO_KEY, 12, 12 + LIGHTING_TOPOLOGY.MAX_LAMPS);
+
+  for (const key of layout?.keys || []) {
+    const ledIndex = Number(key.ledIndex);
+    const keyNumber = Number(key.keyNumber);
+    if (!Number.isInteger(ledIndex) || ledIndex < 0 || ledIndex >= LIGHTING_TOPOLOGY.ACTIVE_LAMPS) continue;
+    if (!Number.isInteger(keyNumber) || keyNumber <= 0 || keyNumber >= PROFILE.MAX_KEYS) continue;
+    bytes[12 + ledIndex] = keyNumber;
+
+    const centerX = Math.max(0, Math.round((key.x + key.w / 2) * 1000));
+    const centerY = Math.max(0, Math.round((key.y + key.h / 2) * 1000));
+    const posOffset = 12 + LIGHTING_TOPOLOGY.MAX_LAMPS + ledIndex * 12;
+    view.setUint32(posOffset + 0, centerX, true);
+    view.setUint32(posOffset + 4, centerY, true);
+    view.setUint32(posOffset + 8, 5000, true);
+  }
+
+  return bytes;
+}
+
+export function decodeLightingTopology(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < LIGHTING_TOPOLOGY.SIZE) {
+    return null;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (view.getUint32(0, true) !== LIGHTING_TOPOLOGY.MAGIC) {
+    return null;
+  }
+  if (view.getUint16(4, true) !== LIGHTING_TOPOLOGY.VERSION || view.getUint16(6, true) !== LIGHTING_TOPOLOGY.SIZE) {
+    return null;
+  }
+
+  const ledCount = Math.min(view.getUint16(8, true), LIGHTING_TOPOLOGY.ACTIVE_LAMPS);
+  const ledToKey = Array.from(bytes.subarray(12, 12 + LIGHTING_TOPOLOGY.MAX_LAMPS));
+  const positions = [];
+  for (let ledIndex = 0; ledIndex < LIGHTING_TOPOLOGY.MAX_LAMPS; ledIndex++) {
+    const posOffset = 12 + LIGHTING_TOPOLOGY.MAX_LAMPS + ledIndex * 12;
+    positions.push({
+      x: view.getUint32(posOffset + 0, true),
+      y: view.getUint32(posOffset + 4, true),
+      z: view.getUint32(posOffset + 8, true),
+    });
+  }
+
+  return { ledCount, ledToKey, positions };
+}
+
+function encodeTextField(bytes, offset, length, value) {
+  const encoded = new TextEncoder().encode(String(value || "").slice(0, length - 1));
+  bytes.set(encoded, offset);
+}
+
+function decodeTextField(bytes, offset, length) {
+  const slice = bytes.subarray(offset, offset + length);
+  const end = slice.indexOf(0);
+  return new TextDecoder().decode(end >= 0 ? slice.subarray(0, end) : slice);
+}
+
+export function encodeLayoutMeta(layoutId, layoutHash, keyboardName, usbProductName, bleDeviceName) {
   const bytes = new Uint8Array(LAYOUT_META.SIZE);
   const view = new DataView(bytes.buffer);
   view.setUint32(0, LAYOUT_META.MAGIC, true);
   view.setUint16(4, LAYOUT_META.VERSION, true);
   view.setUint16(6, LAYOUT_META.SIZE, true);
-  const encoded = new TextEncoder().encode(String(layoutId || "custom").slice(0, LAYOUT_META.ID_LEN - 1));
-  bytes.set(encoded, 8);
-  const encodedName = new TextEncoder().encode(String(keyboardName || "Custom Keyboard")
-    .slice(0, LAYOUT_META.NAME_LEN - 1));
-  bytes.set(encodedName, 8 + LAYOUT_META.ID_LEN);
+  encodeTextField(bytes, 8, LAYOUT_META.ID_LEN, layoutId || "custom");
+  encodeTextField(bytes, 8 + LAYOUT_META.ID_LEN, LAYOUT_META.NAME_LEN, keyboardName || "Custom Keyboard");
   view.setUint32(8 + LAYOUT_META.ID_LEN + LAYOUT_META.NAME_LEN, layoutHash >>> 0, true);
+  encodeTextField(
+    bytes,
+    8 + LAYOUT_META.ID_LEN + LAYOUT_META.NAME_LEN + 4,
+    LAYOUT_META.USB_PRODUCT_NAME_LEN,
+    usbProductName || keyboardName || "Yobboy Keyboard",
+  );
+  encodeTextField(
+    bytes,
+    8 + LAYOUT_META.ID_LEN + LAYOUT_META.NAME_LEN + 4 + LAYOUT_META.USB_PRODUCT_NAME_LEN,
+    LAYOUT_META.BLE_DEVICE_NAME_LEN,
+    bleDeviceName || `${keyboardName || "Yobboy Keyboard"} BLE`,
+  );
   return bytes;
 }
 
@@ -509,15 +770,26 @@ export function decodeLayoutMeta(bytes) {
   }
   const version = view.getUint16(4, true);
   const size = view.getUint16(6, true);
-  const idBytes = bytes.subarray(8, 8 + LAYOUT_META.ID_LEN);
-  const end = idBytes.indexOf(0);
-  const layoutId = new TextDecoder().decode(end >= 0 ? idBytes.subarray(0, end) : idBytes);
+  const layoutId = decodeTextField(bytes, 8, LAYOUT_META.ID_LEN);
 
   if (version === 1 && size === LAYOUT_META.V1_SIZE) {
     return {
       layoutId,
       keyboardName: "Yobboy Keyboard",
       layoutHash: view.getUint32(8 + LAYOUT_META.ID_LEN, true),
+      usbProductName: "Yobboy Keyboard",
+      bleDeviceName: "Yobboy Keyboard BLE",
+    };
+  }
+
+  const keyboardName = decodeTextField(bytes, 8 + LAYOUT_META.ID_LEN, LAYOUT_META.NAME_LEN) || "Yobboy Keyboard";
+  if (version === 2 && size === LAYOUT_META.V2_SIZE && bytes.length >= LAYOUT_META.V2_SIZE) {
+    return {
+      layoutId,
+      keyboardName,
+      layoutHash: view.getUint32(8 + LAYOUT_META.ID_LEN + LAYOUT_META.NAME_LEN, true),
+      usbProductName: keyboardName || "Yobboy Keyboard",
+      bleDeviceName: `${keyboardName || "Yobboy Keyboard"} BLE`,
     };
   }
 
@@ -525,11 +797,19 @@ export function decodeLayoutMeta(bytes) {
     return null;
   }
 
-  const nameBytes = bytes.subarray(8 + LAYOUT_META.ID_LEN, 8 + LAYOUT_META.ID_LEN + LAYOUT_META.NAME_LEN);
-  const nameEnd = nameBytes.indexOf(0);
   return {
     layoutId,
-    keyboardName: new TextDecoder().decode(nameEnd >= 0 ? nameBytes.subarray(0, nameEnd) : nameBytes),
+    keyboardName,
     layoutHash: view.getUint32(8 + LAYOUT_META.ID_LEN + LAYOUT_META.NAME_LEN, true),
+    usbProductName: decodeTextField(
+      bytes,
+      8 + LAYOUT_META.ID_LEN + LAYOUT_META.NAME_LEN + 4,
+      LAYOUT_META.USB_PRODUCT_NAME_LEN,
+    ) || keyboardName || "Yobboy Keyboard",
+    bleDeviceName: decodeTextField(
+      bytes,
+      8 + LAYOUT_META.ID_LEN + LAYOUT_META.NAME_LEN + 4 + LAYOUT_META.USB_PRODUCT_NAME_LEN,
+      LAYOUT_META.BLE_DEVICE_NAME_LEN,
+    ) || `${keyboardName || "Yobboy Keyboard"} BLE`,
   };
 }

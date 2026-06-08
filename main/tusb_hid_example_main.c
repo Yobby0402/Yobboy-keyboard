@@ -10,6 +10,7 @@
 
 #if !CONFIG_LED_STRIP_TEST_APP
 
+#include <stdio.h>
 #include <stdlib.h>
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -33,6 +34,7 @@
 #include "keyboard_power.h"
 #include "keyboard_power_policy.h"
 #include "keyboard_transport.h"
+#include "keyboard_lighting_topology.h"
 #include "config_protocol.h"
 
 #define APP_BUTTON (GPIO_NUM_0)
@@ -51,7 +53,33 @@ static keyboard_config_t *g_config = NULL;
  * 包含键盘 + 鼠标 + Consumer Control (音量) + Lamp Array (Windows 11 动态照明)
  */
 const uint8_t hid_report_descriptor[] = {
-    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(REPORT_ID_KEYBOARD)),
+    0x05, 0x01,                         // Usage Page (Generic Desktop)
+    0x09, 0x06,                         // Usage (Keyboard)
+    0xA1, 0x01,                         // Collection (Application)
+    0x85, REPORT_ID_KEYBOARD,           //   Report ID (Keyboard)
+    0x05, 0x07,                         //   Usage Page (Keyboard/Keypad)
+    0x19, 0xE0,                         //   Usage Minimum (224)
+    0x29, 0xE7,                         //   Usage Maximum (231)
+    0x15, 0x00,                         //   Logical Minimum (0)
+    0x25, 0x01,                         //   Logical Maximum (1)
+    0x75, 0x01,                         //   Report Size (1)
+    0x95, 0x08,                         //   Report Count (8)
+    0x81, 0x02,                         //   Input (Data,Var,Abs)
+    0x75, 0x08,                         //   Report Size (8)
+    0x95, 0x01,                         //   Report Count (1)
+    0x81, 0x01,                         //   Input (Const,Array,Abs)
+    0x05, 0x07,                         //   Usage Page (Keyboard/Keypad)
+    0x19, 0x00,                         //   Usage Minimum (0)
+    0x29, 0xA4,                         //   Usage Maximum (164)
+    0x15, 0x00,                         //   Logical Minimum (0)
+    0x25, 0x01,                         //   Logical Maximum (1)
+    0x75, 0x01,                         //   Report Size (1)
+    0x96, 0xA5, 0x00,                   //   Report Count (165)
+    0x81, 0x02,                         //   Input (Data,Var,Abs)
+    0x75, 0x01,                         //   Report Size (1)
+    0x95, 0x03,                         //   Report Count (3)
+    0x81, 0x01,                         //   Input (Const,Array,Abs)
+    0xC0,                               // End Collection
     TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(REPORT_ID_MOUSE)),
     TUD_HID_REPORT_DESC_CONSUMER(HID_REPORT_ID(REPORT_ID_CONSUMER_CONTROL)),
     TUD_HID_REPORT_DESC_LIGHTING(REPORT_ID_LIGHTING_LAMP_ARRAY_ATTRIBUTES)
@@ -60,13 +88,20 @@ const uint8_t hid_report_descriptor[] = {
 /**
  * @brief String descriptor
  */
+static char s_usb_lang_descriptor[] = {0x09, 0x04};
+static char s_usb_manufacturer_descriptor[] = CONFIG_TINYUSB_DESC_MANUFACTURER_STRING;
+static char s_usb_product_descriptor[YBK_USB_PRODUCT_NAME_LEN] = "Yobboy Keyboard";
+static char s_usb_serial_descriptor[] = CONFIG_TINYUSB_DESC_SERIAL_STRING;
+static char s_usb_hid_descriptor[YBK_USB_PRODUCT_NAME_LEN + 8] = "Yobboy Keyboard HID";
+static char s_usb_cdc_descriptor[YBK_USB_PRODUCT_NAME_LEN + 12] = "Yobboy Keyboard Config";
+
 const char* hid_string_descriptor[] = {
-    (char[]){0x09, 0x04},
-    "Yobboy",
-    "Yobboy Keyboard",
-    "YBK001",
-    "Yobboy Keyboard HID",
-    "Yobboy Config CDC",
+    s_usb_lang_descriptor,
+    s_usb_manufacturer_descriptor,
+    s_usb_product_descriptor,
+    s_usb_serial_descriptor,
+    s_usb_hid_descriptor,
+    s_usb_cdc_descriptor,
 };
 
 /**
@@ -89,7 +124,7 @@ enum {
 static const uint8_t hid_configuration_descriptor[] = {
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, YBK_USB_CONFIG_TOTAL_LEN,
                          TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
-    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 4, false, sizeof(hid_report_descriptor), EPNUM_HID_IN, 16, 10),
+    TUD_HID_DESCRIPTOR(ITF_NUM_HID, 4, HID_ITF_PROTOCOL_KEYBOARD, sizeof(hid_report_descriptor), EPNUM_HID_IN, 32, 1),
     TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 5, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 };
 
@@ -124,6 +159,13 @@ void tud_resume_cb(void)
 {
     keyboard_transport_notify_usb_resume();
     ESP_LOGI(TAG, "USB resumed");
+}
+
+void tud_hid_set_protocol_cb(uint8_t instance, uint8_t protocol)
+{
+    (void)instance;
+    ESP_LOGI(TAG, "USB HID protocol switched to %s",
+             protocol == HID_PROTOCOL_BOOT ? "boot" : "report");
 }
 
 /**
@@ -243,6 +285,7 @@ void lamp_update_task(void *pvParameters)
     }
 }
 
+#if CONFIG_KEYBOARD_AUTO_LIGHT_SLEEP_ENABLE || CONFIG_KEYBOARD_AUTO_DEEP_SLEEP_ENABLE
 static bool transport_allows_light_sleep(const keyboard_transport_status_t *transport)
 {
     if (transport->ble_connected) {
@@ -271,6 +314,7 @@ static void prepare_leds_for_deep_sleep(void)
     NeopixelUpdateEffect();
     ESP_LOGI(TAG, "LEDs turned off before deep sleep");
 }
+#endif
 
 /**
  * @brief 电源管理策略任务
@@ -386,6 +430,15 @@ static void init_usb_cdc_interfaces(void)
     ESP_ERROR_CHECK(config_protocol_start(TINYUSB_CDC_ACM_0));
 }
 
+static void init_usb_descriptor_strings(void)
+{
+    const keyboard_layout_meta_t *meta = keyboard_layout_meta_get();
+    strncpy(s_usb_product_descriptor, meta->usb_product_name, sizeof(s_usb_product_descriptor) - 1);
+    s_usb_product_descriptor[sizeof(s_usb_product_descriptor) - 1] = '\0';
+    snprintf(s_usb_hid_descriptor, sizeof(s_usb_hid_descriptor), "%s HID", s_usb_product_descriptor);
+    snprintf(s_usb_cdc_descriptor, sizeof(s_usb_cdc_descriptor), "%s Config", s_usb_product_descriptor);
+}
+
 /**
  * @brief 主程序
  */
@@ -419,6 +472,7 @@ void app_main(void)
     // 加载 LED 状态（默认关闭，仅 Windows 控制）
     led_load_config_from_nvs();
     ESP_LOGI(TAG, "Initializing keyboard runtime profile...");
+    ESP_ERROR_CHECK(keyboard_lighting_topology_init());
     ESP_ERROR_CHECK(keyboard_profile_init());
     ESP_ERROR_CHECK(keyboard_layout_meta_init());
     ESP_ERROR_CHECK(keyboard_transport_init());
@@ -480,6 +534,7 @@ void app_main(void)
     
     // Initialize USB
     ESP_LOGI(TAG, "Initializing USB with Lamp Array support");
+    init_usb_descriptor_strings();
     const tinyusb_config_t tusb_cfg = {
         .device_descriptor = NULL,
         .string_descriptor = hid_string_descriptor,
@@ -493,12 +548,13 @@ void app_main(void)
     
     // Initialize Lamp Array
     ESP_LOGI(TAG, "Initializing Lamp Array Matrix");
+    const keyboard_lighting_topology_t *lighting_topology = keyboard_lighting_topology_get();
     lamp_array_matrix_cfg_t lamp_cfg = {
         .lamp_array_width = LIGHTMAP_WIDTH,
         .lamp_array_height = LIGHTMAP_HEIGHT,
         .lamp_array_depth = LIGHTMAP_DEPTH,
-        .lamp_array_rotation = LampPositions,
-        .pixel_cnt = LIGHTMAP_NUM,
+        .lamp_array_rotation = lighting_topology->lamp_positions,
+        .pixel_cnt = lighting_topology->led_count,
         .update_interval = LIGHTMAP_UPDATE_INTERVAL,
         .handle = led_strip_handle,
         .bind_key = 0,

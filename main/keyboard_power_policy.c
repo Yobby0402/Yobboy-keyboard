@@ -1,6 +1,7 @@
 #include "keyboard_power_policy.h"
 
 #include "esp_log.h"
+#include "keyboard_ble_config_service.h"
 #include "keyboard_power.h"
 
 static const char *TAG = "keyboard_power_policy";
@@ -12,6 +13,24 @@ static keyboard_power_policy_status_t s_status = {
     .idle_ms = 0,
     .active_scan_interval_ms = 0,
 };
+static uint32_t s_last_status_idle_sec = 0;
+
+static void notify_ble_status_if_needed(const keyboard_power_policy_status_t *before)
+{
+    uint32_t idle_sec = s_status.idle_ms / 1000;
+    bool changed = before == NULL ||
+        before->current_mode != s_status.current_mode ||
+        before->idle_low_scan_active != s_status.idle_low_scan_active ||
+        before->lighting_paused != s_status.lighting_paused ||
+        before->active_scan_interval_ms != s_status.active_scan_interval_ms ||
+        s_last_status_idle_sec != idle_sec;
+    if (!changed) {
+        return;
+    }
+
+    s_last_status_idle_sec = idle_sec;
+    keyboard_ble_config_service_notify_status();
+}
 
 static const char *mode_name(keyboard_power_mode_t mode)
 {
@@ -37,13 +56,19 @@ static bool transport_allows_dynamic_power(const keyboard_transport_status_t *tr
            transport->ble_connected;
 }
 
-static void refresh_scan_state(void)
+static bool transport_forces_low_scan(const keyboard_transport_status_t *transport)
+{
+    return transport != NULL && transport->ble_suspended;
+}
+
+static void refresh_scan_state(const keyboard_transport_status_t *transport)
 {
     s_status.current_mode = keyboard_profile_get_power_mode();
-    s_status.active_scan_interval_ms = s_status.idle_low_scan_active
+    bool low_scan = s_status.idle_low_scan_active || transport_forces_low_scan(transport);
+    s_status.active_scan_interval_ms = low_scan
         ? keyboard_profile_get_idle_scan_interval_ms()
         : keyboard_profile_get_scan_interval_ms();
-    s_status.lighting_paused = s_status.idle_low_scan_active;
+    s_status.lighting_paused = low_scan;
 }
 
 esp_err_t keyboard_power_policy_init(void)
@@ -52,7 +77,8 @@ esp_err_t keyboard_power_policy_init(void)
     s_status.idle_low_scan_active = false;
     s_status.lighting_paused = false;
     s_status.idle_ms = 0;
-    refresh_scan_state();
+    refresh_scan_state(NULL);
+    s_last_status_idle_sec = 0;
 
     ESP_LOGI(TAG, "Runtime mode=%s, scan=%u ms, idle scan=%u ms",
              mode_name(s_status.current_mode),
@@ -63,6 +89,8 @@ esp_err_t keyboard_power_policy_init(void)
 
 void keyboard_power_policy_note_activity(void)
 {
+    keyboard_power_policy_status_t before = s_status;
+
     if (s_status.idle_low_scan_active) {
         ESP_LOGI(TAG, "Exit idle low scan, restore %s mode (%u ms)",
                  mode_name(keyboard_profile_get_power_mode()),
@@ -71,11 +99,13 @@ void keyboard_power_policy_note_activity(void)
 
     s_status.idle_low_scan_active = false;
     s_status.idle_ms = 0;
-    refresh_scan_state();
+    refresh_scan_state(NULL);
+    notify_ble_status_if_needed(&before);
 }
 
 void keyboard_power_policy_tick(const keyboard_transport_status_t *transport)
 {
+    keyboard_power_policy_status_t before = s_status;
     s_status.current_mode = keyboard_profile_get_power_mode();
     s_status.idle_ms = keyboard_power_get_idle_ms();
 
@@ -84,7 +114,8 @@ void keyboard_power_policy_tick(const keyboard_transport_status_t *transport)
             ESP_LOGI(TAG, "Exit idle low scan due to transport state");
         }
         s_status.idle_low_scan_active = false;
-        refresh_scan_state();
+        refresh_scan_state(transport);
+        notify_ble_status_if_needed(&before);
         return;
     }
 
@@ -98,7 +129,8 @@ void keyboard_power_policy_tick(const keyboard_transport_status_t *transport)
     }
 
     s_status.idle_low_scan_active = should_low_scan;
-    refresh_scan_state();
+    refresh_scan_state(transport);
+    notify_ble_status_if_needed(&before);
 }
 
 bool keyboard_power_policy_cycle_mode(void)
@@ -108,10 +140,11 @@ bool keyboard_power_policy_cycle_mode(void)
     }
 
     s_status.idle_low_scan_active = false;
-    refresh_scan_state();
+    refresh_scan_state(NULL);
     ESP_LOGI(TAG, "Runtime mode switched to %s (%u ms)",
              mode_name(s_status.current_mode),
              keyboard_profile_get_scan_interval_ms());
+    notify_ble_status_if_needed(NULL);
     return true;
 }
 
