@@ -9,6 +9,9 @@ export const ACTION_TYPES = {
   LED_BRIGHTNESS_DOWN: 7,
   LED_EFFECT_NEXT: 8,
   POWER_MODE_NEXT: 9,
+  SOCD_TOGGLE: 10,
+  REVERSE_TAP_TOGGLE: 11,
+  WASD_ASSIST_TOGGLE: 12,
 };
 
 export const LED_MODES = [
@@ -95,6 +98,12 @@ export function actionLabel(action) {
       return "LIGHT NEXT";
     case ACTION_TYPES.POWER_MODE_NEXT:
       return "PWR MODE";
+    case ACTION_TYPES.SOCD_TOGGLE:
+      return "SOCD TOG";
+    case ACTION_TYPES.REVERSE_TAP_TOGGLE:
+      return "RTAP TOG";
+    case ACTION_TYPES.WASD_ASSIST_TOGGLE:
+      return "WASD TOG";
     default:
       return `A${action.type}:${action.code}`;
   }

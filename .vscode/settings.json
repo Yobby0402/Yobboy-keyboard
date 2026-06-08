@@ -4,7 +4,7 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-bridge.cfg"
   ],
-  "idf.portWin": "COM27",
+  "idf.portWin": "COM5",
   "idf.flashType": "UART",
   "tabnine.codeLensEnabled": false,
   "editor.defaultFoldingRangeProvider": "espressif.esp-idf-extension",
@@ -30,6 +30,15 @@
     "stdbool.h": "c",
     "stdint.h": "c"
   },
-  "idf.customExtraVars": {},
-  "idf.currentSetup": "C:\\esp\\v5.4.3\\esp-idf"
+  "idf.customExtraVars": {
+    "OPENOCD_SCRIPTS": "C:\\Users\\Yobboy\\.espressif\\tools\\openocd-esp32\\v0.12.0-esp32-20230921/openocd-esp32/share/openocd/scripts",
+    "IDF_CCACHE_ENABLE": "1"
+  },
+  "idf.currentSetup": "C:\\Users\\Yobboy\\esp\\v5.4\\esp-idf",
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=d:\\Code\\2026-6\\Yobboy-keyboard\\build"
+  ]
 }

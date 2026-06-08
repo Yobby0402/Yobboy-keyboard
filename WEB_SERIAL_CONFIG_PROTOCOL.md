@@ -3,6 +3,8 @@
 This firmware exposes one USB CDC ACM port for configuration. The GitHub Pages
 configurator should connect to this CDC port. Browsers require
 HTTPS and a user click before `navigator.serial.requestPort()` can open the device.
+After opening the port, WebSerial clients should assert DTR and RTS so TinyUSB
+considers the CDC terminal connected before the firmware sends responses.
 
 ## Frame Format
 
@@ -40,7 +42,28 @@ their own `type` and do not include the leading status byte.
 0x08 READ_LAYOUT_META
 0x09 WRITE_LAYOUT_META
 0x0A READ_KEY_STATE
+0x0B READ_RUNTIME_STATE
+0x0C PREVIEW_LIGHTING_PRESET
+0x0D READ_LIGHTING_TOPOLOGY
+0x0E WRITE_LIGHTING_TOPOLOGY
+0x0F PREVIEW_LED_INDEX
 0x70 LOG_EVENT
+```
+
+`READ_LIGHTING_TOPOLOGY` and `WRITE_LIGHTING_TOPOLOGY` use a 1052-byte
+`keyboard_lighting_topology_t` blob.
+
+Protocol version 4 appends the current SOCD and reverse tap runtime enabled
+state to `READ_RUNTIME_STATE`:
+
+```text
+uint8_t  current_mode
+uint8_t  idle_low_scan_active
+uint8_t  lighting_paused
+uint8_t  active_scan_interval_ms
+uint32_t idle_ms
+uint8_t  socd_enabled
+uint8_t  reverse_tap_enabled
 ```
 
 Statuses:
@@ -88,6 +111,10 @@ Action types:
 6 LED brightness up
 7 LED brightness down
 8 LED effect next
+9 Power mode next
+10 SOCD toggle
+11 Reverse tap toggle
+12 SOCD + reverse tap toggle
 ```
 
 The profile contains two layers and 80 key slots:
@@ -97,6 +124,30 @@ keymap[layer][key_number]
 ```
 
 Layer `0` is the base layer. Layer `1` is the Fn layer.
+
+## Power Assist Fields
+
+Profile version 9 stores SOCD and reverse tap as global WASD assist settings,
+not per-power-mode settings. The four `keyboard_power_profile_t.reserved` bytes
+are a little-endian `uint32_t`:
+
+```text
+bit 0       SOCD enabled
+bit 1       reverse tap enabled
+bits 2..7   SOCD trigger delay in ms
+bits 8..13  reverse tap delay min in ms
+bits 14..19 reverse tap delay max in ms
+bits 20..25 reverse tap press duration min in ms
+bits 26..31 reverse tap press duration max in ms
+```
+
+Delay fields are clamped to `0..50` ms. Reverse tap duration fields are clamped
+to `1..50` ms and are emitted for at least one report frame even when the
+configured millisecond value is below the FreeRTOS tick period. If `min == max`,
+the value is fixed; otherwise firmware chooses a random value in the inclusive
+range. Key action types `10`, `11`, and `12` toggle these runtime enabled flags
+without changing the stored profile until a configurator writes and commits a
+new profile.
 
 ## Layout Metadata
 

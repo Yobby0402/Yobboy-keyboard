@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "class/hid/hid_device.h"
+#include "keyboard_ble_config_service.h"
 #include "keyboard_input.h"
 #include "keyboard_power_policy.h"
 #include "keyboard_profile.h"
@@ -14,7 +15,7 @@ static const char *TAG = "key_bind";
 static TickType_t last_led_switch_time = 0;
 static TickType_t last_volume_time = 0;
 static TickType_t last_remote_wakeup_time = 0;
-static TickType_t last_power_mode_switch_time = 0;
+static TickType_t last_power_action_time = 0;
 
 #define LED_CONTROL_COOLDOWN_MS CONFIG_LED_SWITCH_SLEEP
 #define VOLUME_CONTROL_COOLDOWN_MS 200
@@ -188,20 +189,41 @@ static void try_remote_wakeup(TickType_t current_time)
 
 static void handle_power_action(uint8_t action_type, TickType_t current_time)
 {
-    if ((current_time - last_power_mode_switch_time) < pdMS_TO_TICKS(POWER_MODE_SWITCH_COOLDOWN_MS)) {
+    if ((current_time - last_power_action_time) < pdMS_TO_TICKS(POWER_MODE_SWITCH_COOLDOWN_MS)) {
         return;
     }
 
-    if (action_type != YBK_ACTION_POWER_MODE_NEXT) {
+    switch (action_type) {
+    case YBK_ACTION_POWER_MODE_NEXT:
+        if (!keyboard_power_policy_cycle_mode()) {
+            ESP_LOGI(TAG, "Power mode cycle ignored (disabled by profile)");
+            return;
+        }
+        break;
+    case YBK_ACTION_SOCD_TOGGLE: {
+        bool enabled = keyboard_profile_toggle_socd_enabled();
+        ESP_LOGI(TAG, "SOCD %s", enabled ? "enabled" : "disabled");
+        keyboard_ble_config_service_notify_status();
+        break;
+    }
+    case YBK_ACTION_REVERSE_TAP_TOGGLE: {
+        bool enabled = keyboard_profile_toggle_reverse_tap_enabled();
+        ESP_LOGI(TAG, "Reverse tap %s", enabled ? "enabled" : "disabled");
+        keyboard_ble_config_service_notify_status();
+        break;
+    }
+    case YBK_ACTION_WASD_ASSIST_TOGGLE:
+        keyboard_profile_toggle_wasd_assists();
+        ESP_LOGI(TAG, "WASD assists: SOCD=%s, reverse tap=%s",
+                 keyboard_profile_socd_enabled() ? "on" : "off",
+                 keyboard_profile_reverse_tap_enabled() ? "on" : "off");
+        keyboard_ble_config_service_notify_status();
+        break;
+    default:
         return;
     }
 
-    if (!keyboard_power_policy_cycle_mode()) {
-        ESP_LOGI(TAG, "Power mode cycle ignored (disabled by profile)");
-        return;
-    }
-
-    last_power_mode_switch_time = current_time;
+    last_power_action_time = current_time;
 }
 
 void process_key_press(int *pressed_pins, int num_pressed_pins)

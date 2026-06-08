@@ -6,6 +6,7 @@
 #include <string.h>
 #include "esp_log.h"
 #include "esp_system.h"
+#include "class/cdc/cdc_device.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -23,6 +24,7 @@ static const char *TAG = "config_protocol";
 #define CONFIG_PROTOCOL_MAX_PAYLOAD (sizeof(keyboard_profile_t) + 32)
 #define CONFIG_PROTOCOL_RX_BUF_SIZE \
     (sizeof(ybk_config_frame_header_t) + CONFIG_PROTOCOL_MAX_PAYLOAD + sizeof(uint32_t))
+#define CONFIG_PROTOCOL_TX_BUF_SIZE CONFIG_PROTOCOL_RX_BUF_SIZE
 #define CONFIG_PROTOCOL_RESPONSE_TYPE(type) ((uint8_t)((type) | 0x80))
 
 static tinyusb_cdcacm_itf_t s_cdc_itf = TINYUSB_CDC_ACM_1;
@@ -30,10 +32,13 @@ static uint8_t s_rx_buf[CONFIG_PROTOCOL_RX_BUF_SIZE];
 static size_t s_rx_len = 0;
 static uint8_t s_external_rx_buf[CONFIG_PROTOCOL_RX_BUF_SIZE];
 static size_t s_external_rx_len = 0;
+static uint8_t s_tx_buf[CONFIG_PROTOCOL_TX_BUF_SIZE];
+static uint8_t s_response_payload[1 + CONFIG_PROTOCOL_MAX_PAYLOAD];
 static SemaphoreHandle_t s_tx_lock = NULL;
 static vprintf_like_t s_original_vprintf = NULL;
 static bool s_log_forward_enabled = false;
 static bool s_log_forward_busy = false;
+static bool s_tx_busy = false;
 
 static uint32_t checksum_update(uint32_t hash, const uint8_t *data, size_t len)
 {
@@ -80,15 +85,75 @@ static ybk_config_status_t status_from_esp_err(esp_err_t err, bool profile_error
 static esp_err_t cdc_write_bytes(const uint8_t *data, size_t len, void *ctx)
 {
     (void)ctx;
+    if (len > 0 && data == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!tusb_cdc_acm_initialized(s_cdc_itf) || !tud_cdc_n_connected(s_cdc_itf)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    size_t offset = 0;
+    while (offset < len) {
+        size_t queued = tinyusb_cdcacm_write_queue(s_cdc_itf, data + offset, len - offset);
+        if (queued == 0) {
+            esp_err_t ret = tinyusb_cdcacm_write_flush(s_cdc_itf, pdMS_TO_TICKS(100));
+            if (ret != ESP_OK) {
+                return ret;
+            }
+            queued = tinyusb_cdcacm_write_queue(s_cdc_itf, data + offset, len - offset);
+            if (queued == 0) {
+                return ESP_ERR_TIMEOUT;
+            }
+        }
+
+        offset += queued;
+        esp_err_t ret = tinyusb_cdcacm_write_flush(s_cdc_itf, pdMS_TO_TICKS(100));
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    return ESP_OK;
+}
+
+static void take_tx_lock(void)
+{
     if (s_tx_lock != NULL) {
         xSemaphoreTake(s_tx_lock, portMAX_DELAY);
     }
-    tinyusb_cdcacm_write_queue(s_cdc_itf, data, len);
-    esp_err_t ret = tinyusb_cdcacm_write_flush(s_cdc_itf, pdMS_TO_TICKS(100));
+}
+
+static void give_tx_lock(void)
+{
     if (s_tx_lock != NULL) {
         xSemaphoreGive(s_tx_lock);
     }
-    return ret;
+}
+
+static esp_err_t send_frame_unlocked_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
+                                         uint8_t type, uint8_t seq,
+                                         const uint8_t *payload, uint16_t payload_len)
+{
+    ybk_config_frame_header_t header = {
+        .magic = YBK_CONFIG_MAGIC,
+        .type = type,
+        .seq = seq,
+        .len = payload_len,
+    };
+
+    size_t offset = 0;
+    memcpy(s_tx_buf + offset, &header, sizeof(header));
+    offset += sizeof(header);
+    if (payload_len > 0 && payload != NULL) {
+        memcpy(s_tx_buf + offset, payload, payload_len);
+        offset += payload_len;
+    }
+
+    uint32_t checksum = frame_checksum(s_tx_buf, offset);
+    write_u32_le(s_tx_buf + offset, checksum);
+    offset += sizeof(checksum);
+
+    return write_fn(s_tx_buf, offset, ctx);
 }
 
 static esp_err_t send_frame_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
@@ -99,28 +164,12 @@ static esp_err_t send_frame_via(ybk_config_transport_write_fn_t write_fn, void *
         return ESP_ERR_INVALID_SIZE;
     }
 
-    uint8_t tx_buf[sizeof(ybk_config_frame_header_t) +
-                   CONFIG_PROTOCOL_MAX_PAYLOAD + sizeof(uint32_t)];
-    ybk_config_frame_header_t header = {
-        .magic = YBK_CONFIG_MAGIC,
-        .type = type,
-        .seq = seq,
-        .len = payload_len,
-    };
-
-    size_t offset = 0;
-    memcpy(tx_buf + offset, &header, sizeof(header));
-    offset += sizeof(header);
-    if (payload_len > 0 && payload != NULL) {
-        memcpy(tx_buf + offset, payload, payload_len);
-        offset += payload_len;
-    }
-
-    uint32_t checksum = frame_checksum(tx_buf, offset);
-    write_u32_le(tx_buf + offset, checksum);
-    offset += sizeof(checksum);
-
-    return write_fn(tx_buf, offset, ctx);
+    take_tx_lock();
+    s_tx_busy = true;
+    esp_err_t ret = send_frame_unlocked_via(write_fn, ctx, type, seq, payload, payload_len);
+    s_tx_busy = false;
+    give_tx_lock();
+    return ret;
 }
 
 static esp_err_t send_frame(uint8_t type, uint8_t seq, const uint8_t *payload, uint16_t payload_len)
@@ -132,19 +181,22 @@ static esp_err_t send_response_via(ybk_config_transport_write_fn_t write_fn, voi
                                    uint8_t command, uint8_t seq, ybk_config_status_t status,
                                    const uint8_t *payload, uint16_t payload_len)
 {
-    uint8_t response_payload[1 + CONFIG_PROTOCOL_MAX_PAYLOAD];
-
-    if (payload_len > CONFIG_PROTOCOL_MAX_PAYLOAD) {
+    if (write_fn == NULL || payload_len > CONFIG_PROTOCOL_MAX_PAYLOAD - 1) {
         return ESP_ERR_INVALID_SIZE;
     }
 
-    response_payload[0] = status;
+    take_tx_lock();
+    s_tx_busy = true;
+    s_response_payload[0] = status;
     if (payload_len > 0 && payload != NULL) {
-        memcpy(response_payload + 1, payload, payload_len);
+        memcpy(s_response_payload + 1, payload, payload_len);
     }
 
-    return send_frame_via(write_fn, ctx, CONFIG_PROTOCOL_RESPONSE_TYPE(command), seq,
-                          response_payload, (uint16_t)(payload_len + 1));
+    esp_err_t ret = send_frame_unlocked_via(write_fn, ctx, CONFIG_PROTOCOL_RESPONSE_TYPE(command), seq,
+                                            s_response_payload, (uint16_t)(payload_len + 1));
+    s_tx_busy = false;
+    give_tx_lock();
+    return ret;
 }
 
 static esp_err_t send_response(uint8_t command, uint8_t seq, ybk_config_status_t status,
@@ -157,6 +209,15 @@ static esp_err_t send_simple_response_via(ybk_config_transport_write_fn_t write_
                                           uint8_t command, uint8_t seq, ybk_config_status_t status)
 {
     return send_response_via(write_fn, ctx, command, seq, status, NULL, 0);
+}
+
+static void send_bad_length_response_via(ybk_config_transport_write_fn_t write_fn, void *ctx,
+                                         uint8_t command, uint8_t seq,
+                                         uint16_t actual_len, size_t expected_len)
+{
+    ESP_LOGW(TAG, "Bad config payload length: cmd=0x%02x len=%u expected=%u",
+             command, actual_len, (unsigned)expected_len);
+    send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
 }
 
 static esp_err_t send_simple_response(uint8_t command, uint8_t seq, ybk_config_status_t status)
@@ -213,6 +274,8 @@ static void send_runtime_state_via(ybk_config_transport_write_fn_t write_fn, voi
         .lighting_paused = status->lighting_paused ? 1 : 0,
         .active_scan_interval_ms = status->active_scan_interval_ms,
         .idle_ms = status->idle_ms,
+        .socd_enabled = keyboard_profile_socd_enabled() ? 1 : 0,
+        .reverse_tap_enabled = keyboard_profile_reverse_tap_enabled() ? 1 : 0,
     };
 
     send_response_via(write_fn, ctx, command, seq,
@@ -235,7 +298,8 @@ static int config_log_vprintf(const char *fmt, va_list args)
         ret = vprintf(fmt, args);
     }
 
-    if (s_log_forward_enabled && !s_log_forward_busy) {
+    if (s_log_forward_enabled && !s_log_forward_busy && !s_tx_busy &&
+        tusb_cdc_acm_initialized(s_cdc_itf) && tud_cdc_n_connected(s_cdc_itf)) {
         char line[192];
         int len = vsnprintf(line, sizeof(line), fmt, copy);
         if (len > 0) {
@@ -259,7 +323,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
     switch (command) {
     case YBK_CONFIG_CMD_GET_INFO: {
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 
@@ -272,7 +336,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_READ_PROFILE: {
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 
@@ -284,7 +348,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_WRITE_PROFILE: {
         if (len != sizeof(keyboard_profile_t)) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, sizeof(keyboard_profile_t));
             return;
         }
 
@@ -295,7 +359,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_COMMIT_PROFILE: {
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 
@@ -307,7 +371,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_RESET_PROFILE: {
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 
@@ -318,7 +382,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_PREVIEW_LED: {
         if (len != sizeof(ybk_config_led_preview_t)) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, sizeof(ybk_config_led_preview_t));
             return;
         }
 
@@ -337,7 +401,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_PREVIEW_LIGHTING_PRESET: {
         if (len != sizeof(keyboard_lighting_preset_t)) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, sizeof(keyboard_lighting_preset_t));
             return;
         }
 
@@ -350,7 +414,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_READ_LIGHTING_TOPOLOGY: {
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 
@@ -362,7 +426,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_WRITE_LIGHTING_TOPOLOGY: {
         if (len != sizeof(keyboard_lighting_topology_t)) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, sizeof(keyboard_lighting_topology_t));
             return;
         }
 
@@ -379,7 +443,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_PREVIEW_LED_INDEX: {
         if (len != sizeof(ybk_config_led_index_preview_t)) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, sizeof(ybk_config_led_index_preview_t));
             return;
         }
 
@@ -396,7 +460,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_REBOOT:
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 
@@ -407,7 +471,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_READ_LAYOUT_META: {
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 
@@ -419,7 +483,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_WRITE_LAYOUT_META: {
         if (len != sizeof(keyboard_layout_meta_t)) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, sizeof(keyboard_layout_meta_t));
             return;
         }
 
@@ -433,7 +497,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_READ_KEY_STATE:
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 
@@ -442,7 +506,7 @@ static void handle_command_via(ybk_config_transport_write_fn_t write_fn, void *c
 
     case YBK_CONFIG_CMD_READ_RUNTIME_STATE:
         if (len != 0) {
-            send_simple_response_via(write_fn, ctx, command, seq, YBK_CONFIG_STATUS_BAD_LENGTH);
+            send_bad_length_response_via(write_fn, ctx, command, seq, len, 0);
             return;
         }
 

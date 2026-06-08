@@ -24,6 +24,7 @@ typedef struct {
     bool first_down;
     bool second_down;
     socd_side_t synthetic_side;
+    bool synthetic_sent;
     TickType_t synthetic_from;
     TickType_t synthetic_until;
 } reverse_tap_pair_state_t;
@@ -172,6 +173,36 @@ static TickType_t randomizable_duration_ticks(uint8_t duration_ms, bool randomiz
     return pdMS_TO_TICKS(effective_duration_ms);
 }
 
+static TickType_t random_range_ticks(uint8_t min_ms, uint8_t max_ms)
+{
+    uint8_t low = min_ms;
+    uint8_t high = max_ms;
+
+    if (low > high) {
+        uint8_t tmp = low;
+        low = high;
+        high = tmp;
+    }
+    if (high == 0) {
+        return 0;
+    }
+    if (low == high) {
+        return pdMS_TO_TICKS(high);
+    }
+
+    uint32_t span = (uint32_t)high - low + 1u;
+    return pdMS_TO_TICKS(low + (esp_random() % span));
+}
+
+static TickType_t random_nonzero_range_ticks(uint8_t min_ms, uint8_t max_ms)
+{
+    TickType_t ticks = random_range_ticks(min_ms, max_ms);
+    if (ticks == 0 && (min_ms != 0 || max_ms != 0)) {
+        return 1;
+    }
+    return ticks;
+}
+
 static void socd_track_passthrough(socd_pair_state_t *state, bool first_down, bool second_down)
 {
     if (state == NULL) {
@@ -279,6 +310,7 @@ static void reverse_tap_track_passthrough(reverse_tap_pair_state_t *state, bool 
     state->first_down = first_down;
     state->second_down = second_down;
     state->synthetic_side = SOCD_SIDE_NONE;
+    state->synthetic_sent = false;
     state->synthetic_from = 0;
     state->synthetic_until = 0;
 }
@@ -286,7 +318,9 @@ static void reverse_tap_track_passthrough(reverse_tap_pair_state_t *state, bool 
 static void apply_reverse_tap_pair(keyboard_input_report_t *report, reverse_tap_pair_state_t *state,
                                    bool first_physical_down, bool second_physical_down,
                                    uint8_t first_code, uint8_t second_code,
-                                   TickType_t now, uint8_t delay_ms, uint8_t duration_ms, bool randomize)
+                                   TickType_t now,
+                                   uint8_t delay_min_ms, uint8_t delay_max_ms,
+                                   uint8_t duration_min_ms, uint8_t duration_max_ms)
 {
     bool first_released = state->first_down && !first_physical_down;
     bool second_released = state->second_down && !second_physical_down;
@@ -294,19 +328,22 @@ static void apply_reverse_tap_pair(keyboard_input_report_t *report, reverse_tap_
 
     if (first_physical_down || second_physical_down) {
         state->synthetic_side = SOCD_SIDE_NONE;
+        state->synthetic_sent = false;
         state->synthetic_from = 0;
         state->synthetic_until = 0;
     } else if (!both_released) {
         if (first_released) {
-            TickType_t delay_ticks = randomizable_duration_ticks(delay_ms, randomize);
-            TickType_t duration_ticks = randomizable_duration_ticks(duration_ms, randomize);
-            state->synthetic_side = duration_ticks == 0 ? SOCD_SIDE_NONE : SOCD_SIDE_SECOND;
+            TickType_t delay_ticks = random_range_ticks(delay_min_ms, delay_max_ms);
+            TickType_t duration_ticks = random_nonzero_range_ticks(duration_min_ms, duration_max_ms);
+            state->synthetic_side = SOCD_SIDE_SECOND;
+            state->synthetic_sent = false;
             state->synthetic_from = now + delay_ticks;
             state->synthetic_until = state->synthetic_from + duration_ticks;
         } else if (second_released) {
-            TickType_t delay_ticks = randomizable_duration_ticks(delay_ms, randomize);
-            TickType_t duration_ticks = randomizable_duration_ticks(duration_ms, randomize);
-            state->synthetic_side = duration_ticks == 0 ? SOCD_SIDE_NONE : SOCD_SIDE_FIRST;
+            TickType_t delay_ticks = random_range_ticks(delay_min_ms, delay_max_ms);
+            TickType_t duration_ticks = random_nonzero_range_ticks(duration_min_ms, duration_max_ms);
+            state->synthetic_side = SOCD_SIDE_FIRST;
+            state->synthetic_sent = false;
             state->synthetic_from = now + delay_ticks;
             state->synthetic_until = state->synthetic_from + duration_ticks;
         }
@@ -315,11 +352,13 @@ static void apply_reverse_tap_pair(keyboard_input_report_t *report, reverse_tap_
     if (!first_physical_down && !second_physical_down && state->synthetic_side != SOCD_SIDE_NONE) {
         if (!tick_has_elapsed(now, state->synthetic_from)) {
             /* wait for reverse-tap delay */
-        } else if (!tick_has_elapsed(now, state->synthetic_until)) {
+        } else if (!tick_has_elapsed(now, state->synthetic_until) || !state->synthetic_sent) {
             report_append_keycode(report,
                                   state->synthetic_side == SOCD_SIDE_FIRST ? first_code : second_code);
+            state->synthetic_sent = true;
         } else {
             state->synthetic_side = SOCD_SIDE_NONE;
+            state->synthetic_sent = false;
             state->synthetic_from = 0;
             state->synthetic_until = 0;
         }
@@ -332,12 +371,12 @@ static void apply_reverse_tap_pair(keyboard_input_report_t *report, reverse_tap_
 static void keyboard_input_apply_wasd_assists(keyboard_input_report_t *report)
 {
     bool enabled = keyboard_profile_socd_enabled();
-    bool randomize = keyboard_profile_socd_randomize();
     uint8_t delay_ms = keyboard_profile_socd_delay_ms();
     bool reverse_tap_enabled = keyboard_profile_reverse_tap_enabled();
-    bool reverse_tap_randomize = keyboard_profile_reverse_tap_randomize();
-    uint8_t reverse_tap_delay_ms = keyboard_profile_reverse_tap_delay_ms();
-    uint8_t reverse_tap_duration_ms = keyboard_profile_reverse_tap_duration_ms();
+    uint8_t reverse_tap_delay_min_ms = keyboard_profile_reverse_tap_delay_min_ms();
+    uint8_t reverse_tap_delay_max_ms = keyboard_profile_reverse_tap_delay_max_ms();
+    uint8_t reverse_tap_duration_min_ms = keyboard_profile_reverse_tap_duration_min_ms();
+    uint8_t reverse_tap_duration_max_ms = keyboard_profile_reverse_tap_duration_max_ms();
     TickType_t now = xTaskGetTickCount();
     bool a_down = report_has_keycode(report, HID_KEY_A);
     bool d_down = report_has_keycode(report, HID_KEY_D);
@@ -348,8 +387,8 @@ static void keyboard_input_apply_wasd_assists(keyboard_input_report_t *report)
         socd_track_passthrough(&s_socd_horizontal, a_down, d_down);
         socd_track_passthrough(&s_socd_vertical, w_down, s_down);
     } else {
-        apply_socd_pair(report, &s_socd_horizontal, HID_KEY_A, HID_KEY_D, now, delay_ms, randomize);
-        apply_socd_pair(report, &s_socd_vertical, HID_KEY_W, HID_KEY_S, now, delay_ms, randomize);
+        apply_socd_pair(report, &s_socd_horizontal, HID_KEY_A, HID_KEY_D, now, delay_ms, false);
+        apply_socd_pair(report, &s_socd_vertical, HID_KEY_W, HID_KEY_S, now, delay_ms, false);
     }
 
     if (!reverse_tap_enabled) {
@@ -360,10 +399,12 @@ static void keyboard_input_apply_wasd_assists(keyboard_input_report_t *report)
 
     apply_reverse_tap_pair(report, &s_reverse_tap_horizontal, a_down, d_down,
                            HID_KEY_A, HID_KEY_D, now,
-                           reverse_tap_delay_ms, reverse_tap_duration_ms, reverse_tap_randomize);
+                           reverse_tap_delay_min_ms, reverse_tap_delay_max_ms,
+                           reverse_tap_duration_min_ms, reverse_tap_duration_max_ms);
     apply_reverse_tap_pair(report, &s_reverse_tap_vertical, w_down, s_down,
                            HID_KEY_W, HID_KEY_S, now,
-                           reverse_tap_delay_ms, reverse_tap_duration_ms, reverse_tap_randomize);
+                           reverse_tap_delay_min_ms, reverse_tap_delay_max_ms,
+                           reverse_tap_duration_min_ms, reverse_tap_duration_max_ms);
 }
 
 void keyboard_input_build_report(const int *pressed_pins, int num_pressed_pins,
@@ -405,6 +446,9 @@ void keyboard_input_build_report(const int *pressed_pins, int num_pressed_pins,
             }
             break;
         case YBK_ACTION_POWER_MODE_NEXT:
+        case YBK_ACTION_SOCD_TOGGLE:
+        case YBK_ACTION_REVERSE_TAP_TOGGLE:
+        case YBK_ACTION_WASD_ASSIST_TOGGLE:
             if (report->power_action_count < KEYBOARD_INPUT_MAX_POWER_ACTIONS) {
                 report->power_actions[report->power_action_count++] = action->type;
             }

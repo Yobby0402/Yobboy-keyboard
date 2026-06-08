@@ -9,7 +9,6 @@
 #include "esp_check.h"
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
-#include "esp_hidd.h"
 #include "esp_log.h"
 #include "keyboard_power_policy.h"
 #include "keyboard_profile.h"
@@ -206,6 +205,8 @@ static void build_status(ybk_ble_config_status_t *status)
     status->active_transport = (uint8_t)transport->active_mode;
     status->current_mode = (uint8_t)policy->current_mode;
     status->active_scan_interval_ms = policy->active_scan_interval_ms;
+    status->reserved[0] = keyboard_profile_socd_enabled() ? 1 : 0;
+    status->reserved[1] = keyboard_profile_reverse_tap_enabled() ? 1 : 0;
     status->profile_checksum = keyboard_profile_get_checksum();
     status->idle_ms = policy->idle_ms;
 

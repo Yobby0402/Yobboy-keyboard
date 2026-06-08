@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 #define YBK_CONFIG_MAGIC 0x314B4259u /* "YBK1" little-endian */
-#define YBK_CONFIG_PROTOCOL_VERSION 3
+#define YBK_CONFIG_PROTOCOL_VERSION 4
 
 typedef enum {
     YBK_CONFIG_CMD_GET_INFO = 0x01,
@@ -81,6 +81,8 @@ typedef struct {
     uint8_t lighting_paused;
     uint8_t active_scan_interval_ms;
     uint32_t idle_ms;
+    uint8_t socd_enabled;
+    uint8_t reverse_tap_enabled;
 } __attribute__((packed)) ybk_config_runtime_state_t;
 
 typedef struct {

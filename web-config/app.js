@@ -25,7 +25,6 @@ import {
   lightingBytes,
   lightingPresetBytes,
   ledPreviewPayload,
-  ledIndexPreviewPayload,
   setAction,
   setLightingActivePreset,
   setLightingKeyColor,
@@ -34,7 +33,7 @@ import {
   setLightingPreset,
   setPowerSettings,
   validateProfile,
-} from "./protocol.js";
+} from "./protocol.js?v=20260609c";
 
 const els = {
   connect: document.querySelector("#btn-connect"),
@@ -52,6 +51,7 @@ const els = {
   deviceName: document.querySelector("#device-name"),
   statusText: document.querySelector("#status-text"),
   statusDot: document.querySelector("#status-dot"),
+  toast: document.querySelector("#app-toast"),
   console: document.querySelector("#console-mini"),
   keyboardScroll: document.querySelector("#keyboard-scroll"),
   keyboardFit: document.querySelector("#keyboard-fit"),
@@ -82,7 +82,6 @@ const els = {
   clearKey: document.querySelector("#btn-clear-key"),
   restoreKey: document.querySelector("#btn-restore-key"),
   applyBinding: document.querySelector("#btn-apply-binding"),
-  previewLedIndex: document.querySelector("#btn-preview-led-index"),
   ledEnabled: document.querySelector("#led-enabled"),
   addLightConfig: document.querySelector("#btn-add-light-config"),
   lightingConfigMeta: document.querySelector("#lighting-config-meta"),
@@ -114,11 +113,11 @@ const els = {
   powerModeCycle: document.querySelector("#power-mode-cycle"),
   socdEnabled: document.querySelector("#socd-enabled"),
   socdDelay: document.querySelector("#socd-delay-ms"),
-  socdRandomize: document.querySelector("#socd-randomize"),
   reverseTapEnabled: document.querySelector("#reverse-tap-enabled"),
-  reverseTapDelay: document.querySelector("#reverse-tap-delay-ms"),
-  reverseTapDuration: document.querySelector("#reverse-tap-duration-ms"),
-  reverseTapRandomize: document.querySelector("#reverse-tap-randomize"),
+  reverseTapDelayMin: document.querySelector("#reverse-tap-delay-min-ms"),
+  reverseTapDelayMax: document.querySelector("#reverse-tap-delay-max-ms"),
+  reverseTapDurationMin: document.querySelector("#reverse-tap-duration-min-ms"),
+  reverseTapDurationMax: document.querySelector("#reverse-tap-duration-max-ms"),
   scanGame: document.querySelector("#scan-game-ms"),
   scanOffice: document.querySelector("#scan-office-ms"),
   scanSaver: document.querySelector("#scan-saver-ms"),
@@ -127,12 +126,12 @@ const els = {
   idleDeepSleep: document.querySelector("#idle-deep-sleep-ms"),
   runtimeMode: document.querySelector("#runtime-mode"),
   runtimeScan: document.querySelector("#runtime-scan"),
+  runtimeSocd: document.querySelector("#runtime-socd"),
+  runtimeReverseTap: document.querySelector("#runtime-reverse-tap"),
   runtimeIdle: document.querySelector("#runtime-idle"),
   runtimeLighting: document.querySelector("#runtime-lighting"),
   settingsTabs: Array.from(document.querySelectorAll("[data-settings-tab]")),
   settingsPanels: Array.from(document.querySelectorAll("[data-settings-panel]")),
-  mapMode: document.querySelector("#btn-map-mode"),
-  ledMapMode: document.querySelector("#btn-led-map-mode"),
   defaultLayout: document.querySelector("#btn-default-layout"),
   kleDialog: document.querySelector("#kle-dialog"),
   kleInput: document.querySelector("#kle-input"),
@@ -143,16 +142,25 @@ const els = {
   toggleInputTest: document.querySelector("#toggle-input-test"),
   toggleDeviceScan: document.querySelector("#toggle-device-scan"),
   toggleKeyNumber: document.querySelector("#toggle-key-number"),
+  toggleLedIndex: document.querySelector("#toggle-led-index"),
   toggleBinding: document.querySelector("#toggle-binding"),
   inputTestStatus: document.querySelector("#input-test-status"),
   changeList: document.querySelector("#change-list"),
   changeListEmpty: document.querySelector("#change-list-empty"),
+  keyHistoryList: document.querySelector("#key-history-list"),
+  keyHistoryEmpty: document.querySelector("#key-history-empty"),
+  bottomTabs: Array.from(document.querySelectorAll("[data-bottom-tab]")),
+  bottomPanels: Array.from(document.querySelectorAll("[data-bottom-panel]")),
   protocolVersion: document.querySelector("#protocol-version"),
   profileVersion: document.querySelector("#profile-version"),
   profileChecksum: document.querySelector("#profile-checksum"),
   profileKeys: document.querySelector("#profile-keys"),
   profileLayers: document.querySelector("#profile-layers"),
 };
+
+const INPUT_TEST_RECENT_MS = 900;
+const INPUT_TEST_RECENT_MAX = 6;
+const KEY_HISTORY_MAX = 50;
 
 const I18N = {
   en: {
@@ -161,9 +169,14 @@ const I18N = {
     exportJson: "Export",
     help: "Help",
     read: "Read",
-    save: "Save",
+    autoReadProfile: "Connected. Reading keyboard profile...",
+    autoReadSkipped: "Auto read skipped because local changes are unsaved.",
+    save: "Apply to Keyboard",
+    applySuccess: "Applied to keyboard.",
+    applyFailed: "Apply failed",
     reboot: "Reboot",
     connect: "Connect",
+    portSelectionCancelled: "Port selection cancelled.",
     disconnect: "Disconnect",
     disconnected: "DISCONNECTED",
     connected: "CONNECTED: ESP32-S3",
@@ -176,14 +189,20 @@ const I18N = {
     keymap: "Keymap",
     lighting: "Lighting",
     layout: "Layout",
-    console: "DEBUG CONSOLE",
+    console: "Debug Info",
     inputTest: "Input Test",
     deviceScan: "Device Scan",
     inputTestIdle: "Press keys while this page is focused.",
     inputTestOff: "Input test is disabled.",
     inputTestDisconnected: "Connect the keyboard to use input test.",
     inputTestActive: "Active",
+    inputTestRecent: "Recent",
     inputTestUnmapped: "Unmapped event",
+    keyHistory: "Key History",
+    keyHistoryEmpty: "No key history yet.",
+    keyHistoryDown: "pressed",
+    keyHistoryUp: "released",
+    keyHistoryGap: "gap",
     deviceScanIdle: "Device scan is idle.",
     deviceScanOff: "Device scan is disabled.",
     deviceScanDisconnected: "Connect the keyboard to read matrix state.",
@@ -242,10 +261,10 @@ const I18N = {
     infoPowerModeDefault: "This decides which scan-speed profile the keyboard enters after boot.",
     infoPowerModeCycle: "If enabled, the dedicated power-mode key can switch between Game, Office, and Saver on the keyboard itself.",
     infoSocd: "SOCD resolves opposite directions while both keys are physically held. It does not inject extra taps after release.",
-    infoSocdDelay: "Delay before the newly pressed opposite direction takes over. Random mode picks a value between 1 and this value.",
+    infoSocdDelay: "Delay before the newly pressed opposite direction takes over.",
     infoReverseTap: "Reverse Tap injects a short opposite direction after release, which is useful for counter-strafe style input.",
-    infoReverseTapDelay: "Wait time after releasing the key before the reverse tap starts.",
-    infoReverseTapDuration: "How long the injected opposite direction stays active.",
+    infoReverseTapDelay: "Wait range after releasing the key before the reverse tap starts. Use the same min and max for a fixed value.",
+    infoReverseTapDuration: "Active range for the injected opposite direction. Use the same min and max for a fixed value.",
     selectAllKeys: "Select All Keys",
     clearAllKeys: "Clear All Keys",
     paintAllKeys: "Paint All Keys",
@@ -253,6 +272,7 @@ const I18N = {
     staticActionSelect: "Click to Select",
     staticActionPaint: "Click to Paint",
     keyNumberShort: "Key #",
+    ledIndexShort: "LED #",
     binding: "Binding",
     keyProperties: "KEY PROPERTIES",
     layerBindings: "Layer Bindings",
@@ -267,6 +287,9 @@ const I18N = {
     actionLedDown: "LED Brightness Down",
     actionLedNext: "Lighting Preset Next",
     actionPowerModeNext: "Power Mode Next",
+    actionSocdToggle: "SOCD Toggle",
+    actionReverseTapToggle: "Reverse Tap Toggle",
+    actionWasdAssistToggle: "WASD Assist Toggle",
     keycodeSearch: "KEYCODE SEARCH",
     keyPicker: "Keyboard Picker",
     keyPickerTitle: "Choose Keyboard Key",
@@ -274,7 +297,6 @@ const I18N = {
     controlAction: "CONTROL ACTION",
     keyNumber: "KEY NUMBER",
     ledIndex: "LED INDEX",
-    previewLed: "Preview LED",
     clearKey: "Clear Key",
     restore: "Restore",
     applyBinding: "Apply Binding",
@@ -297,14 +319,14 @@ const I18N = {
     socd: "SOCD",
     socdEnable: "Enable SOCD (WASD)",
     socdDelay: "Trigger Delay (ms)",
-    socdRandom: "Randomize 1..N ms",
     socdDescription: "Use SOCD when opposite directions may be held together. Example: hold A, then press D, and the output switches to D after the configured delay.",
     socdUseCase: "Best for clean opposite-direction resolution while two keys are physically held.",
     reverseTap: "Reverse Tap Assist",
     reverseTapEnable: "Enable Reverse Tap (WASD)",
-    reverseTapDelay: "Tap Delay (ms)",
-    reverseTapDuration: "Tap Duration (ms)",
-    reverseTapRandom: "Randomize delay and duration to 1..N ms",
+    reverseTapDelayMin: "Delay Min (ms)",
+    reverseTapDelayMax: "Delay Max (ms)",
+    reverseTapDurationMin: "Duration Min (ms)",
+    reverseTapDurationMax: "Duration Max (ms)",
     reverseTapDescription: "Use this for counter-strafe style release assist. Example: release W, wait for the configured delay, and then briefly tap S for the configured duration.",
     reverseTapUseCase: "Best for FPS-style stop or counter-strafe behavior after releasing a movement key.",
     scanGame: "Game Scan (ms)",
@@ -318,6 +340,8 @@ const I18N = {
     runtimeState: "Runtime State",
     runtimeMode: "Current Mode",
     runtimeScan: "Scan Interval",
+    runtimeSocd: "SOCD",
+    runtimeReverseTap: "Reverse Tap",
     runtimeIdle: "Idle Time",
     runtimeLighting: "Lighting",
     paused: "Paused",
@@ -325,7 +349,7 @@ const I18N = {
     close: "Close",
     helpTitle: "Help",
     helpConnectTitle: "Connect Device",
-    helpConnectBody: "Use Connect to open the Config CDC port, then Read to load the current profile.",
+    helpConnectBody: "Use Connect to open the Config CDC port. The current profile is read automatically after connection; use Read to refresh it manually.",
     helpLayoutTitle: "Keyboard View",
     helpLayoutBody: "Key # shows the matrix number. Binding shows the current action only when a key has a real mapping.",
     helpTabsTitle: "Settings Tabs",
@@ -338,8 +362,6 @@ const I18N = {
     helpReverseTapBody: "Reverse Tap Assist is different from SOCD. It can wait for a configurable delay after you release W, A, S, or D, then inject a short opposite-direction tap for the configured duration.",
     layoutSource: "LAYOUT SOURCE",
     layoutNote: "Device profile does not include visual layout data.",
-    mapMode: "Key Number Map Mode",
-    ledMapMode: "LED Map Mode",
     restoreDefaultLayout: "Restore Default Layout",
     importKleTitle: "Import Keyboard Layout Editor",
     cancel: "Cancel",
@@ -357,9 +379,14 @@ const I18N = {
     exportJson: "导出",
     help: "帮助",
     read: "读取",
-    save: "保存",
+    autoReadProfile: "连接成功，正在自动读取键盘配置...",
+    autoReadSkipped: "存在未保存修改，已跳过自动读取。",
+    save: "应用到键盘",
+    applySuccess: "已应用到键盘。",
+    applyFailed: "应用失败",
     reboot: "重启",
     connect: "连接",
+    portSelectionCancelled: "已取消选择串口。",
     disconnect: "断开",
     disconnected: "未连接",
     connected: "已连接：ESP32-S3",
@@ -379,7 +406,13 @@ const I18N = {
     inputTestOff: "按键测试已关闭。",
     inputTestDisconnected: "请先连接键盘，再使用按键测试。",
     inputTestActive: "已按下",
+    inputTestRecent: "最近输入",
     inputTestUnmapped: "未匹配的输入",
+    keyHistory: "按键记录",
+    keyHistoryEmpty: "还没有按键记录。",
+    keyHistoryDown: "按下",
+    keyHistoryUp: "抬起",
+    keyHistoryGap: "间隔",
     deviceScanIdle: "设备扫描空闲。",
     deviceScanOff: "设备扫描已关闭。",
     deviceScanDisconnected: "请先连接键盘，再读取矩阵按键状态。",
@@ -438,10 +471,10 @@ const I18N = {
     infoPowerModeDefault: "决定键盘上电后默认进入哪一种扫描速度配置。",
     infoPowerModeCycle: "开启后，可以通过键盘上的功耗切换键在游戏、办公、节能三种模式之间轮换。",
     infoSocd: "SOCD 只处理两个相反方向同时按住时的最终输出，不会在松手后主动补键。",
-    infoSocdDelay: "新按下的相反方向在接管前要等待多久。开启随机后，会在 1 到这个值之间取随机延时。",
+    infoSocdDelay: "新按下的相反方向在接管前要等待多久。",
     infoReverseTap: "反向补键会在松开按键后，主动注入一个短暂的反方向输入，适合部分 FPS 的急停节奏。",
-    infoReverseTapDelay: "松开按键后，要等待多久才开始补这个反向输入。",
-    infoReverseTapDuration: "注入的反向输入会持续多久。",
+    infoReverseTapDelay: "松开按键后，要等待多久才开始补这个反向输入。最小值和最大值相同就是固定值。",
+    infoReverseTapDuration: "注入的反向输入会持续多久。最小值和最大值相同就是固定值。",
     selectAllKeys: "全选按键",
     clearAllKeys: "全部清空",
     paintAllKeys: "全部上色",
@@ -449,6 +482,7 @@ const I18N = {
     staticActionSelect: "点击选择",
     staticActionPaint: "点击上色",
     keyNumberShort: "键号",
+    ledIndexShort: "LED号",
     binding: "绑定",
     keyProperties: "按键属性",
     layerBindings: "双层绑定",
@@ -463,6 +497,9 @@ const I18N = {
     actionLedDown: "亮度降低",
     actionLedNext: "切换灯光预设",
     actionPowerModeNext: "切换功耗模式",
+    actionSocdToggle: "开关 SOCD",
+    actionReverseTapToggle: "开关反向补键",
+    actionWasdAssistToggle: "开关 SOCD 和反向补键",
     keycodeSearch: "键码搜索",
     keyPicker: "键盘选键器",
     keyPickerTitle: "选择键盘按键",
@@ -470,7 +507,6 @@ const I18N = {
     controlAction: "控制动作",
     keyNumber: "固件键号",
     ledIndex: "LED 序号",
-    previewLed: "预览 LED",
     clearKey: "清空",
     restore: "恢复",
     applyBinding: "应用绑定",
@@ -493,14 +529,14 @@ const I18N = {
     socd: "SOCD",
     socdEnable: "启用 SOCD（仅 WASD）",
     socdDelay: "触发延时 (ms)",
-    socdRandom: "随机延时（1~N ms）",
     socdDescription: "SOCD 用于处理两个相反方向同时成立时的输出。比如按住 A 再按 D，键盘会在设定延时后切到 D。",
     socdUseCase: "适合需要稳定处理对冲输入的场景，也就是两个方向键同时被真实按住时的判定。",
     reverseTap: "反向补键",
     reverseTapEnable: "启用反向补键（仅 WASD）",
-    reverseTapDelay: "补键延迟 (ms)",
-    reverseTapDuration: "补键时长 (ms)",
-    reverseTapRandom: "随机延迟和时长（1~N ms）",
+    reverseTapDelayMin: "补键延迟最小值 (ms)",
+    reverseTapDelayMax: "补键延迟最大值 (ms)",
+    reverseTapDurationMin: "补键时长最小值 (ms)",
+    reverseTapDurationMax: "补键时长最大值 (ms)",
     reverseTapDescription: "反向补键用于松开方向键后，先等待设定延迟，再自动短按一次反方向。比如松开 W 后，等待一小段时间，再自动短按一下 S。",
     reverseTapUseCase: "适合 FPS 里的急停或 counter-strafe 一类需求，它不是 SOCD，而是松开时主动补一个反向输入。",
     scanGame: "游戏扫描 (ms)",
@@ -514,6 +550,8 @@ const I18N = {
     runtimeState: "运行状态",
     runtimeMode: "当前模式",
     runtimeScan: "扫描间隔",
+    runtimeSocd: "SOCD",
+    runtimeReverseTap: "反向补键",
     runtimeIdle: "空闲时间",
     runtimeLighting: "灯光刷新",
     paused: "已暂停",
@@ -521,7 +559,7 @@ const I18N = {
     close: "关闭",
     helpTitle: "帮助",
     helpConnectTitle: "连接设备",
-    helpConnectBody: "先点击连接选择 Config CDC 端口，再点击读取加载键盘当前配置。",
+    helpConnectBody: "点击连接选择 Config CDC 端口；连接成功后会自动读取键盘当前配置，需要刷新时再手动点击读取。",
     helpLayoutTitle: "键盘视图",
     helpLayoutBody: "Key # 表示矩阵键号，Binding 只在按键存在实际动作时才显示。",
     helpTabsTitle: "设置页签",
@@ -529,13 +567,11 @@ const I18N = {
     helpPowerTitle: "功耗模式",
     helpPowerBody: "Game、Office、Saver 对应正常扫描速度，Idle Scan 和休眠阈值在 BLE 低功耗策略中生效。",
     helpSocdTitle: "SOCD",
-    helpSocdBody: "SOCD 只处理最终输出的 HID W/A/S/D。按住一个方向后再按相反方向时，新方向会按设置的延时后接管；开启随机后，实际延时会落在 1 到 N 毫秒之间。",
+    helpSocdBody: "SOCD 只处理最终输出的 HID W/A/S/D。按住一个方向后再按相反方向时，新方向会按设置的延时后接管。",
     helpReverseTapTitle: "反向补键",
     helpReverseTapBody: "反向补键和 SOCD 不是一回事。它会在你松开 W、A、S、D 后，先等待设定延迟，再补一个设定时长的反方向输入，适合某些游戏中的急停或反向制动。",
     layoutSource: "布局来源",
     layoutNote: "键盘 profile 当前不包含可视布局数据。",
-    mapMode: "键号映射模式",
-    ledMapMode: "LED 映射模式",
     restoreDefaultLayout: "恢复默认布局",
     importKleTitle: "导入 Keyboard Layout Editor",
     cancel: "取消",
@@ -564,15 +600,21 @@ const state = {
   selectedKeyId: null,
   layer: 0,
   dirty: false,
-  mapMode: false,
-  ledMapMode: false,
+  connectBusy: false,
   pressedEvents: new Map(),
   pressedKeyIds: new Set(),
+  recentInputEvents: [],
+  inputRecentTimer: null,
+  activeKeyTimings: new Map(),
+  keyHistory: [],
   devicePressedKeyIds: new Set(),
   devicePressedNumbers: [],
   scanTimer: null,
+  scanPollInFlight: false,
   runtimeTimer: null,
+  runtimePollInFlight: false,
   inputTestHint: "",
+  toastTimer: null,
   info: null,
   layoutMeta: null,
   keyboardName: defaultLayout().name,
@@ -581,6 +623,7 @@ const state = {
   lang: localStorage.getItem("ybk-lang") || "zh",
   runtimeState: null,
   settingsTab: "keymap",
+  bottomPanel: localStorage.getItem("ybk-bottom-panel") || "console",
   lightingPresetIndex: 0,
   lightingWebPreview: localStorage.getItem("ybk-light-preview") !== "0",
   lightingDraftGroups: {},
@@ -591,6 +634,19 @@ state.transports.bluetooth.onStatus = () => {
   if (state.transportMode !== "bluetooth") return;
   refreshStatusFromTransport();
   renderRuntimeState();
+};
+
+state.transports.serial.onDisconnect = () => {
+  if (state.transportMode !== "serial") return;
+  setConnectedUi(false);
+  updateInputTestStatus();
+  log("[SERIAL] Disconnected");
+};
+
+state.transports.bluetooth.onDisconnect = () => {
+  if (state.transportMode !== "bluetooth") return;
+  setConnectedUi(false);
+  updateInputTestStatus();
 };
 
 function activeTransport() {
@@ -775,6 +831,9 @@ const ZH_SYMBOLIC_LABELS = new Map([
   ["LED -", "\u4eae\u5ea6-"],
   ["LIGHT NEXT", "\u5207\u6362\u706f\u5149\u9884\u8bbe"],
   ["PWR MODE", "\u5207\u6362\u529f\u8017"],
+  ["SOCD TOG", "\u5f00\u5173SOCD"],
+  ["RTAP TOG", "\u5f00\u5173\u8865\u952e"],
+  ["WASD TOG", "\u5f00\u5173\u8f85\u52a9"],
 ]);
 
 const LIGHTING_MODE_LABELS = new Map([
@@ -911,6 +970,16 @@ function log(message) {
   while (els.console.children.length > 40) els.console.removeChild(els.console.firstChild);
 }
 
+function showToast(message, type = "info") {
+  if (!els.toast) return;
+  window.clearTimeout(state.toastTimer);
+  els.toast.textContent = message;
+  els.toast.className = `app-toast ${type}`;
+  state.toastTimer = window.setTimeout(() => {
+    els.toast.classList.add("hidden");
+  }, 3200);
+}
+
 function cloneLayoutData(layout) {
   return JSON.parse(JSON.stringify(layout));
 }
@@ -1043,6 +1112,8 @@ function runtimeStateFromBleStatus(status) {
     lightingPaused: (status.flags & 0x80) !== 0,
     activeScanIntervalMs: status.activeScanIntervalMs,
     idleMs: status.idleMs,
+    socdEnabled: status.socdEnabled,
+    reverseTapEnabled: status.reverseTapEnabled,
   };
 }
 
@@ -1085,13 +1156,25 @@ function setConnectedUi(connected) {
     clearInputTest();
   } else {
     startRuntimePoll();
-    if (els.toggleDeviceScan.checked) {
+    if (shouldPollDeviceState()) {
       startDeviceScan();
     }
   }
   updateInfo();
   refreshStatusFromTransport();
   renderInspector();
+}
+
+function setConnectionBusy(busy) {
+  state.connectBusy = busy;
+  els.connect.disabled = busy;
+  if (els.transportSelect) {
+    els.transportSelect.disabled = busy;
+  }
+}
+
+function isPortSelectionCancelled(error) {
+  return /No port selected/i.test(error?.message || "");
 }
 
 function updateLayoutSource() {
@@ -1690,16 +1773,136 @@ function rebuildPressedKeys() {
   state.pressedKeyIds = pressed;
 }
 
+function pruneRecentInputEvents() {
+  const cutoff = Date.now() - INPUT_TEST_RECENT_MS;
+  state.recentInputEvents = state.recentInputEvents.filter((item) => item.time >= cutoff);
+}
+
+function scheduleRecentInputRefresh() {
+  if (state.inputRecentTimer) return;
+  state.inputRecentTimer = setTimeout(() => {
+    state.inputRecentTimer = null;
+    pruneRecentInputEvents();
+    updateInputTestStatus();
+    if (state.recentInputEvents.length) {
+      scheduleRecentInputRefresh();
+    }
+  }, INPUT_TEST_RECENT_MS);
+}
+
+function inputEventLabel(info, matches) {
+  if (matches.length) {
+    return matches
+      .map((match) => `${displayKeyLabel(match.label)}${match.layer === state.layer ? "" : localizedLayerTag(match.layer)}`)
+      .join("+");
+  }
+  return info.label;
+}
+
+function monotonicMs() {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
+function formatClockMs(epochMs) {
+  const date = new Date(epochMs);
+  const pad = (value, width = 2) => String(value).padStart(width, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}
+
+function formatIntervalMs(value) {
+  if (value == null) return "--";
+  return `${value}ms`;
+}
+
+function startKeyTiming(event, info, matches) {
+  if (event.repeat || state.activeKeyTimings.has(event.code)) return;
+  state.activeKeyTimings.set(event.code, {
+    label: inputEventLabel(info, matches),
+    downPerfMs: monotonicMs(),
+    downEpochMs: Date.now(),
+  });
+}
+
+function recordKeyHistory(eventCode) {
+  const active = state.activeKeyTimings.get(eventCode);
+  if (!active) return;
+
+  state.activeKeyTimings.delete(eventCode);
+  const upPerfMs = monotonicMs();
+  const previous = state.keyHistory[0] || null;
+  const record = {
+    label: active.label,
+    downEpochMs: active.downEpochMs,
+    durationMs: Math.max(0, Math.round(upPerfMs - active.downPerfMs)),
+    gapMs: previous ? Math.round(active.downPerfMs - previous.upPerfMs) : null,
+    upPerfMs,
+  };
+  state.keyHistory.unshift(record);
+  state.keyHistory = state.keyHistory.slice(0, KEY_HISTORY_MAX);
+  renderKeyHistory();
+}
+
+function formatKeyHistoryRecord(record) {
+  if (state.lang === "zh") {
+    return `${formatClockMs(record.downEpochMs)}  ${record.label} ${t("keyHistoryDown")} ${record.durationMs}ms ${t("keyHistoryUp")}, ${t("keyHistoryGap")} ${formatIntervalMs(record.gapMs)}`;
+  }
+  return `${formatClockMs(record.downEpochMs)}  ${record.label} ${t("keyHistoryDown")} ${record.durationMs}ms ${t("keyHistoryUp")}, ${t("keyHistoryGap")} ${formatIntervalMs(record.gapMs)}`;
+}
+
+function renderKeyHistory() {
+  if (!els.keyHistoryList || !els.keyHistoryEmpty) return;
+  els.keyHistoryList.innerHTML = "";
+  els.keyHistoryEmpty.classList.toggle("hidden", state.keyHistory.length > 0);
+  for (const record of state.keyHistory) {
+    const item = document.createElement("div");
+    item.className = "key-history-line";
+    item.textContent = formatKeyHistoryRecord(record);
+    els.keyHistoryList.appendChild(item);
+  }
+}
+
+function setBottomPanel(panel) {
+  const selected = els.bottomPanels.some((item) => item.dataset.bottomPanel === panel)
+    ? panel
+    : "console";
+  state.bottomPanel = selected;
+  localStorage.setItem("ybk-bottom-panel", selected);
+  for (const button of els.bottomTabs) {
+    const active = button.dataset.bottomTab === selected;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  }
+  for (const panelEl of els.bottomPanels) {
+    panelEl.hidden = panelEl.dataset.bottomPanel !== selected;
+  }
+}
+
+function recordRecentInput(info, matches) {
+  pruneRecentInputEvents();
+  state.recentInputEvents.unshift({
+    label: inputEventLabel(info, matches),
+    time: Date.now(),
+  });
+  state.recentInputEvents = state.recentInputEvents.slice(0, INPUT_TEST_RECENT_MAX);
+  scheduleRecentInputRefresh();
+}
+
 function updateInputTestStatus() {
   const parts = [];
   if (!deviceConnected()) {
     parts.push(t("inputTestDisconnected"));
   } else if (els.toggleInputTest.checked) {
+    pruneRecentInputEvents();
     const labels = [];
     for (const matches of state.pressedEvents.values()) {
       for (const match of matches) {
         labels.push(`${displayKeyLabel(match.label)}${match.layer === state.layer ? "" : localizedLayerTag(match.layer)}`);
       }
+    }
+    if (!labels.length && state.devicePressedNumbers.length) {
+      labels.push(...devicePressedLabels());
     }
     if (labels.length) {
       parts.push(`${t("inputTestActive")}: ${labels.join(", ")}`);
@@ -1708,6 +1911,9 @@ function updateInputTestStatus() {
     } else {
       parts.push(t("inputTestIdle"));
     }
+    if (state.recentInputEvents.length) {
+      parts.push(`${t("inputTestRecent")}: ${state.recentInputEvents.map((item) => item.label).join(", ")}`);
+    }
   } else {
     parts.push(t("inputTestOff"));
   }
@@ -1715,14 +1921,22 @@ function updateInputTestStatus() {
   if (!deviceConnected()) {
     parts.push(t("deviceScanDisconnected"));
   } else if (els.toggleDeviceScan.checked) {
+    const deviceLabels = devicePressedLabels();
     parts.push(state.devicePressedNumbers.length
-      ? `${t("deviceScanActive")}: ${state.devicePressedNumbers.join(", ")}`
+      ? `${t("deviceScanActive")}: ${state.devicePressedNumbers.map((number, index) => `${number}:${deviceLabels[index] || "--"}`).join(", ")}`
       : t("deviceScanIdle"));
   } else {
     parts.push(t("deviceScanOff"));
   }
 
   els.inputTestStatus.textContent = parts.join(" | ");
+}
+
+function devicePressedLabels() {
+  return state.devicePressedNumbers.map((number) => {
+    const key = state.layout.keys.find((item) => item.keyNumber === number);
+    return key ? displayKeyLabel(key.label) : `#${number}`;
+  });
 }
 
 function isEditableTarget(target) {
@@ -1781,13 +1995,23 @@ function renderKeyboard() {
       selectKey(key.id);
     });
 
-    const num = document.createElement("span");
-    num.className = "key-number";
-    num.textContent = els.toggleKeyNumber.checked
-      ? (state.ledMapMode ? (key.ledIndex ?? "--") : (key.keyNumber ?? "--"))
-      : "";
+    const meta = document.createElement("span");
+    meta.className = "key-meta";
+    if (els.toggleKeyNumber.checked) {
+      const num = document.createElement("span");
+      num.className = "key-number";
+      num.textContent = key.keyNumber ?? "--";
+      meta.appendChild(num);
+    }
+    if (els.toggleLedIndex.checked) {
+      const led = document.createElement("span");
+      led.className = "key-led-index";
+      led.textContent = key.ledIndex ?? "--";
+      meta.appendChild(led);
+    }
 
     const label = document.createElement("span");
+    label.className = "key-label";
     label.textContent = displayKeyLabel(key.label);
 
     const binding = document.createElement("span");
@@ -1796,7 +2020,7 @@ function renderKeyboard() {
       ? displayActionLabel(action)
       : "";
 
-    button.append(num, label, binding);
+    button.append(meta, label, binding);
     els.canvas.appendChild(button);
   }
   updateKeyboardScale();
@@ -1903,7 +2127,6 @@ function renderInspector() {
   els.actionType.value = String(action.type);
   els.keySelect.value = String(action.code);
   els.consumerSelect.value = String(action.code);
-  els.previewLedIndex.disabled = !deviceConnected() || sanitizeLedIndex(key?.ledIndex) == null;
   for (const checkbox of els.modifierGrid.querySelectorAll("input")) {
     checkbox.checked = (action.code & Number(checkbox.value)) !== 0;
   }
@@ -2100,16 +2323,16 @@ function renderPowerSettings() {
   els.powerModeCycle.checked = power.allowModeCycle;
   els.socdEnabled.checked = power.socdEnabled;
   els.socdDelay.value = String(power.socdDelayMs);
-  els.socdRandomize.checked = power.socdRandomize;
-  els.socdDelay.disabled = !power.socdEnabled;
-  els.socdRandomize.disabled = !power.socdEnabled;
   els.reverseTapEnabled.checked = power.reverseTapEnabled;
-  els.reverseTapDelay.value = String(power.reverseTapDelayMs);
-  els.reverseTapDuration.value = String(power.reverseTapDurationMs);
-  els.reverseTapRandomize.checked = power.reverseTapRandomize;
-  els.reverseTapDelay.disabled = !power.reverseTapEnabled;
-  els.reverseTapDuration.disabled = !power.reverseTapEnabled;
-  els.reverseTapRandomize.disabled = !power.reverseTapEnabled;
+  els.reverseTapDelayMin.value = String(power.reverseTapDelayMinMs);
+  els.reverseTapDelayMax.value = String(power.reverseTapDelayMaxMs);
+  els.reverseTapDurationMin.value = String(power.reverseTapDurationMinMs);
+  els.reverseTapDurationMax.value = String(power.reverseTapDurationMaxMs);
+  els.socdDelay.disabled = false;
+  els.reverseTapDelayMin.disabled = false;
+  els.reverseTapDelayMax.disabled = false;
+  els.reverseTapDurationMin.disabled = false;
+  els.reverseTapDurationMax.disabled = false;
   els.scanGame.value = String(power.scanGameMs);
   els.scanOffice.value = String(power.scanOfficeMs);
   els.scanSaver.value = String(power.scanSaverMs);
@@ -2122,8 +2345,17 @@ function renderRuntimeState() {
   const runtime = state.transportMode === "bluetooth" && deviceConnected()
     ? runtimeStateFromBleStatus(currentBleTransport().lastStatus)
     : state.runtimeState;
+  const power = getPowerSettings(state.profile);
+  const socdEnabled = runtime && typeof runtime.socdEnabled === "boolean"
+    ? runtime.socdEnabled
+    : power.socdEnabled;
+  const reverseTapEnabled = runtime && typeof runtime.reverseTapEnabled === "boolean"
+    ? runtime.reverseTapEnabled
+    : power.reverseTapEnabled;
   els.runtimeMode.textContent = runtime ? powerModeLabel(runtime.currentMode) : "--";
   els.runtimeScan.textContent = runtime ? `${runtime.activeScanIntervalMs} ms` : "--";
+  els.runtimeSocd.textContent = onOffLabel(socdEnabled);
+  els.runtimeReverseTap.textContent = onOffLabel(reverseTapEnabled);
   els.runtimeIdle.textContent = runtime ? formatIdleMs(runtime.idleMs) : "--";
   if (!runtime) {
     els.runtimeLighting.textContent = "--";
@@ -2138,17 +2370,37 @@ function applyPowerSettings() {
     if (!Number.isFinite(value)) return fallback;
     return Math.max(min, Math.min(max, Math.round(value)));
   };
+  const readRange = (minElement, maxElement, minFallback, maxFallback, min = 0, max = 50) => {
+    const minValue = readValue(minElement, minFallback, min, max);
+    const maxValue = readValue(maxElement, maxFallback, min, max);
+    return [Math.min(minValue, maxValue), Math.max(minValue, maxValue)];
+  };
+  const [reverseTapDelayMinMs, reverseTapDelayMaxMs] = readRange(
+    els.reverseTapDelayMin,
+    els.reverseTapDelayMax,
+    0,
+    0,
+  );
+  const [reverseTapDurationMinMs, reverseTapDurationMaxMs] = readRange(
+    els.reverseTapDurationMin,
+    els.reverseTapDurationMax,
+    12,
+    12,
+    1,
+    50,
+  );
+  const currentPower = getPowerSettings(state.profile);
 
   setPowerSettings(state.profile, {
     defaultMode: Number(els.powerModeDefault.value || 0),
     allowModeCycle: els.powerModeCycle.checked,
-    socdEnabled: els.socdEnabled.checked,
+    socdEnabled: currentPower.socdEnabled,
     socdDelayMs: readValue(els.socdDelay, 10, 0, 50),
-    socdRandomize: els.socdRandomize.checked,
-    reverseTapEnabled: els.reverseTapEnabled.checked,
-    reverseTapDelayMs: readValue(els.reverseTapDelay, 0, 0, 50),
-    reverseTapDurationMs: readValue(els.reverseTapDuration, 12, 0, 50),
-    reverseTapRandomize: els.reverseTapRandomize.checked,
+    reverseTapEnabled: currentPower.reverseTapEnabled,
+    reverseTapDelayMinMs,
+    reverseTapDelayMaxMs,
+    reverseTapDurationMinMs,
+    reverseTapDurationMaxMs,
     scanGameMs: readValue(els.scanGame, 1, 1, 100),
     scanOfficeMs: readValue(els.scanOffice, 4, 1, 100),
     scanSaverMs: readValue(els.scanSaver, 8, 1, 100),
@@ -2160,10 +2412,24 @@ function applyPowerSettings() {
 }
 
 async function pollRuntimeState() {
-  if (!deviceConnected()) return;
-  const ret = await activeTransport().command(COMMAND.READ_RUNTIME_STATE, new Uint8Array(), 1200);
-  if (ret.status !== 0) throw new Error(ret.statusText);
-  state.runtimeState = decodeRuntimeState(ret.data);
+  if (!deviceConnected() || state.runtimePollInFlight) return;
+  state.runtimePollInFlight = true;
+  try {
+    const ret = await activeTransport().command(COMMAND.READ_RUNTIME_STATE, new Uint8Array(), 1200);
+    if (ret.status !== 0) throw new Error(ret.statusText);
+    state.runtimeState = decodeRuntimeState(ret.data);
+    renderRuntimeState();
+  } finally {
+    state.runtimePollInFlight = false;
+  }
+}
+
+function handleRuntimePollError(error) {
+  log(`[RUNTIME] ${error.message}`);
+  if (!deviceConnected()) {
+    stopRuntimePoll();
+    return;
+  }
   renderRuntimeState();
 }
 
@@ -2172,6 +2438,7 @@ function stopRuntimePoll() {
     clearInterval(state.runtimeTimer);
     state.runtimeTimer = null;
   }
+  state.runtimePollInFlight = false;
   state.runtimeState = null;
   renderRuntimeState();
 }
@@ -2184,20 +2451,20 @@ function startRuntimePoll() {
   }
   if (state.runtimeTimer) return;
   state.runtimeTimer = setInterval(() => {
-    pollRuntimeState().catch((error) => {
-      log(`[RUNTIME] ${error.message}`);
-      stopRuntimePoll();
-    });
+    pollRuntimeState().catch(handleRuntimePollError);
   }, 1000);
-  pollRuntimeState().catch((error) => {
-    log(`[RUNTIME] ${error.message}`);
-    stopRuntimePoll();
-  });
+  pollRuntimeState().catch(handleRuntimePollError);
 }
 
 function clearInputTest() {
   state.pressedEvents.clear();
+  state.activeKeyTimings.clear();
   state.inputTestHint = "";
+  state.recentInputEvents = [];
+  if (state.inputRecentTimer) {
+    clearTimeout(state.inputRecentTimer);
+    state.inputRecentTimer = null;
+  }
   rebuildPressedKeys();
   renderKeyboard();
   updateInputTestStatus();
@@ -2216,11 +2483,20 @@ function updateDevicePressedKeys(keyNumbers) {
   updateInputTestStatus();
 }
 
+function shouldPollDeviceState() {
+  return deviceConnected() && (els.toggleDeviceScan.checked || els.toggleInputTest.checked);
+}
+
 async function pollDeviceState() {
-  if (!deviceConnected() || !els.toggleDeviceScan.checked) return;
-  const ret = await activeTransport().command(COMMAND.READ_KEY_STATE, new Uint8Array(), 1200);
-  if (ret.status !== 0) throw new Error(ret.statusText);
-  updateDevicePressedKeys(decodeKeyState(ret.data));
+  if (!shouldPollDeviceState() || state.scanPollInFlight) return;
+  state.scanPollInFlight = true;
+  try {
+    const ret = await activeTransport().command(COMMAND.READ_KEY_STATE, new Uint8Array(), 1200);
+    if (ret.status !== 0) throw new Error(ret.statusText);
+    updateDevicePressedKeys(decodeKeyState(ret.data));
+  } finally {
+    state.scanPollInFlight = false;
+  }
 }
 
 function stopDeviceScan() {
@@ -2228,6 +2504,7 @@ function stopDeviceScan() {
     clearInterval(state.scanTimer);
     state.scanTimer = null;
   }
+  state.scanPollInFlight = false;
   state.devicePressedNumbers = [];
   state.devicePressedKeyIds = new Set();
   renderKeyboard();
@@ -2235,7 +2512,7 @@ function stopDeviceScan() {
 }
 
 function startDeviceScan() {
-  if (!deviceConnected() || state.scanTimer) return;
+  if (!shouldPollDeviceState() || state.scanTimer) return;
   state.scanTimer = setInterval(() => {
     pollDeviceState().catch((error) => {
       log(`[SCAN] ${error.message}`);
@@ -2260,6 +2537,8 @@ function handleInputTestKeyDown(event) {
   }
 
   const matches = findKeysForEvent(info);
+  startKeyTiming(event, info, matches);
+  if (!event.repeat) recordRecentInput(info, matches);
   state.pressedEvents.set(event.code, matches);
   state.inputTestHint = matches.length ? "" : `${t("inputTestUnmapped")}: ${info.label}`;
   rebuildPressedKeys();
@@ -2270,6 +2549,7 @@ function handleInputTestKeyDown(event) {
 
 function handleInputTestKeyUp(event) {
   if (!deviceConnected() || !els.toggleInputTest.checked) return;
+  recordKeyHistory(event.code);
   state.pressedEvents.delete(event.code);
   if (state.pressedEvents.size === 0) state.inputTestHint = "";
   rebuildPressedKeys();
@@ -2382,6 +2662,21 @@ async function readDeviceProfile() {
   setDirty(false);
   renderAll();
   log("[DEVICE] Profile loaded");
+}
+
+async function requestDeviceProfileRead({ source = "manual" } = {}) {
+  if (state.dirty && !confirm(t("discardRead"))) {
+    if (source === "auto") log(t("autoReadSkipped"));
+    return false;
+  }
+  if (source === "auto") log(t("autoReadProfile"));
+  try {
+    await readDeviceProfile();
+    return true;
+  } catch (error) {
+    log(`[ERROR] ${error.message}`);
+    return false;
+  }
 }
 
 async function saveDeviceProfile() {
@@ -2517,20 +2812,20 @@ function currentChangeItems() {
     if (currentPower.socdDelayMs !== basePower.socdDelayMs) {
       fields.push(`${t("socdDelay")} ${basePower.socdDelayMs} -> ${currentPower.socdDelayMs}`);
     }
-    if (currentPower.socdRandomize !== basePower.socdRandomize) {
-      fields.push(`${t("socdRandom")} ${onOffLabel(basePower.socdRandomize)} -> ${onOffLabel(currentPower.socdRandomize)}`);
-    }
     if (currentPower.reverseTapEnabled !== basePower.reverseTapEnabled) {
       fields.push(`${t("reverseTapEnable")} ${onOffLabel(basePower.reverseTapEnabled)} -> ${onOffLabel(currentPower.reverseTapEnabled)}`);
     }
-    if (currentPower.reverseTapDelayMs !== basePower.reverseTapDelayMs) {
-      fields.push(`${t("reverseTapDelay")} ${basePower.reverseTapDelayMs} -> ${currentPower.reverseTapDelayMs}`);
+    if (currentPower.reverseTapDelayMinMs !== basePower.reverseTapDelayMinMs) {
+      fields.push(`${t("reverseTapDelayMin")} ${basePower.reverseTapDelayMinMs} -> ${currentPower.reverseTapDelayMinMs}`);
     }
-    if (currentPower.reverseTapDurationMs !== basePower.reverseTapDurationMs) {
-      fields.push(`${t("reverseTapDuration")} ${basePower.reverseTapDurationMs} -> ${currentPower.reverseTapDurationMs}`);
+    if (currentPower.reverseTapDelayMaxMs !== basePower.reverseTapDelayMaxMs) {
+      fields.push(`${t("reverseTapDelayMax")} ${basePower.reverseTapDelayMaxMs} -> ${currentPower.reverseTapDelayMaxMs}`);
     }
-    if (currentPower.reverseTapRandomize !== basePower.reverseTapRandomize) {
-      fields.push(`${t("reverseTapRandom")} ${onOffLabel(basePower.reverseTapRandomize)} -> ${onOffLabel(currentPower.reverseTapRandomize)}`);
+    if (currentPower.reverseTapDurationMinMs !== basePower.reverseTapDurationMinMs) {
+      fields.push(`${t("reverseTapDurationMin")} ${basePower.reverseTapDurationMinMs} -> ${currentPower.reverseTapDurationMinMs}`);
+    }
+    if (currentPower.reverseTapDurationMaxMs !== basePower.reverseTapDurationMaxMs) {
+      fields.push(`${t("reverseTapDurationMax")} ${basePower.reverseTapDurationMaxMs} -> ${currentPower.reverseTapDurationMaxMs}`);
     }
     if (currentPower.scanGameMs !== basePower.scanGameMs) {
       fields.push(`${t("scanGame")} ${basePower.scanGameMs} -> ${currentPower.scanGameMs}`);
@@ -2641,7 +2936,9 @@ function renderAll() {
   renderLighting();
   renderPowerSettings();
   renderRuntimeState();
+  setBottomPanel(state.bottomPanel);
   updateInputTestStatus();
+  renderKeyHistory();
   renderChangeList();
 }
 
@@ -2727,6 +3024,8 @@ async function importConfig(file) {
 
 function wireEvents() {
   els.connect.addEventListener("click", async () => {
+    if (state.connectBusy) return;
+    setConnectionBusy(true);
     try {
       const transport = activeTransport();
       if (transport.connected) {
@@ -2740,23 +3039,41 @@ function wireEvents() {
       log(state.transportMode === "bluetooth"
         ? "[BLE] Connected to custom config service."
         : "[SERIAL] Connected. Select the Config CDC port.");
+      await requestDeviceProfileRead({ source: "auto" });
     } catch (error) {
-      log(`[ERROR] ${error.message}`);
-      setStatus(t("connectFailed"), false);
+      if (isPortSelectionCancelled(error)) {
+        log(`[SERIAL] ${t("portSelectionCancelled")}`);
+        setStatus(t("disconnected"), false);
+      } else {
+        log(`[ERROR] ${error.message}`);
+        setStatus(t("connectFailed"), false);
+      }
+    } finally {
+      setConnectionBusy(false);
+      setConnectedUi(deviceConnected());
     }
   });
 
   els.transportSelect?.addEventListener("change", async () => {
+    if (state.connectBusy) return;
+    setConnectionBusy(true);
     const previous = activeTransport();
-    if (previous.connected) {
-      await previous.disconnect();
+    try {
+      if (previous.connected) {
+        await previous.disconnect();
+      }
+      state.transportMode = els.transportSelect.value === "bluetooth" ? "bluetooth" : "serial";
+      localStorage.setItem("ybk-transport", state.transportMode);
+      setConnectedUi(deviceConnected());
+      updateInputTestStatus();
+      refreshStatusFromTransport();
+      log(`[TRANSPORT] ${state.transportMode === "bluetooth" ? "BLE" : "USB CDC"} selected`);
+    } catch (error) {
+      log(`[ERROR] ${error.message}`);
+    } finally {
+      setConnectionBusy(false);
+      setConnectedUi(deviceConnected());
     }
-    state.transportMode = els.transportSelect.value === "bluetooth" ? "bluetooth" : "serial";
-    localStorage.setItem("ybk-transport", state.transportMode);
-    setConnectedUi(deviceConnected());
-    updateInputTestStatus();
-    refreshStatusFromTransport();
-    log(`[TRANSPORT] ${state.transportMode === "bluetooth" ? "BLE" : "USB CDC"} selected`);
   });
 
   els.help.addEventListener("click", () => {
@@ -2777,19 +3094,16 @@ function wireEvents() {
   });
 
   els.read.addEventListener("click", async () => {
-    if (state.dirty && !confirm(t("discardRead"))) return;
-    try {
-      await readDeviceProfile();
-    } catch (error) {
-      log(`[ERROR] ${error.message}`);
-    }
+    await requestDeviceProfileRead();
   });
 
   els.save.addEventListener("click", async () => {
     try {
       await saveDeviceProfile();
+      showToast(t("applySuccess"), "success");
     } catch (error) {
       log(`[ERROR] ${error.message}`);
+      showToast(`${t("applyFailed")}: ${error.message}`, "error");
     }
   });
 
@@ -2806,6 +3120,9 @@ function wireEvents() {
   els.actionType.addEventListener("change", updateActionEditor);
   for (const button of els.settingsTabs) {
     button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab));
+  }
+  for (const button of els.bottomTabs) {
+    button.addEventListener("click", () => setBottomPanel(button.dataset.bottomTab));
   }
   els.applyBinding.addEventListener("click", applyBinding);
   els.clearKey.addEventListener("click", () => {
@@ -2850,29 +3167,6 @@ function wireEvents() {
     updateActionEditor();
     els.keyPickerDialog.showModal();
   });
-  els.previewLedIndex.addEventListener("click", async () => {
-    const key = selectedKey();
-    const ledIndex = sanitizeLedIndex(key?.ledIndex);
-    if (ledIndex == null) return;
-    const preset = selectedLightingPreset();
-    try {
-      const ret = await activeTransport().command(
-        COMMAND.PREVIEW_LED_INDEX,
-        ledIndexPreviewPayload(ledIndex, {
-          brightness: 100,
-          red: preset?.red ?? 255,
-          green: preset?.green ?? 255,
-          blue: preset?.blue ?? 255,
-        }),
-        1200,
-      );
-      if (ret.status !== 0) throw new Error(ret.statusText);
-      log(`[LIGHT] Preview LED ${ledIndex}`);
-    } catch (error) {
-      log(`[ERROR] ${error.message}`);
-    }
-  });
-
   for (const el of [els.ledEnabled, els.ledMode, els.brightness, els.ledColor, els.lightingAutoCycle]) {
     el.addEventListener("input", () => {
       els.brightnessOut.textContent = `${els.brightness.value}%`;
@@ -2969,11 +3263,11 @@ function wireEvents() {
     els.powerModeCycle,
     els.socdEnabled,
     els.socdDelay,
-    els.socdRandomize,
     els.reverseTapEnabled,
-    els.reverseTapDelay,
-    els.reverseTapDuration,
-    els.reverseTapRandomize,
+    els.reverseTapDelayMin,
+    els.reverseTapDelayMax,
+    els.reverseTapDurationMin,
+    els.reverseTapDurationMax,
     els.scanGame,
     els.scanOffice,
     els.scanSaver,
@@ -2993,18 +3287,23 @@ function wireEvents() {
   els.toggleInputTest.addEventListener("change", () => {
     if (!els.toggleInputTest.checked) {
       clearInputTest();
+      if (!shouldPollDeviceState()) {
+        stopDeviceScan();
+      }
     } else {
+      startDeviceScan();
       updateInputTestStatus();
     }
   });
   els.toggleDeviceScan.addEventListener("change", () => {
-    if (els.toggleDeviceScan.checked) {
+    if (shouldPollDeviceState()) {
       startDeviceScan();
     } else {
       stopDeviceScan();
     }
   });
   els.toggleKeyNumber.addEventListener("change", renderKeyboard);
+  els.toggleLedIndex.addEventListener("change", renderKeyboard);
   els.toggleBinding.addEventListener("change", renderKeyboard);
 
   els.importKle.addEventListener("click", () => els.kleDialog.showModal());
@@ -3024,19 +3323,6 @@ function wireEvents() {
     }
   });
 
-  els.mapMode.addEventListener("click", () => {
-    state.mapMode = !state.mapMode;
-    els.mapMode.classList.toggle("primary", state.mapMode);
-    els.mapMode.classList.toggle("secondary", !state.mapMode);
-    log(`[LAYOUT] Key number map mode ${state.mapMode ? "enabled" : "disabled"}`);
-  });
-  els.ledMapMode.addEventListener("click", () => {
-    state.ledMapMode = !state.ledMapMode;
-    els.ledMapMode.classList.toggle("primary", state.ledMapMode);
-    els.ledMapMode.classList.toggle("secondary", !state.ledMapMode);
-    renderKeyboard();
-    log(`[LAYOUT] LED map mode ${state.ledMapMode ? "enabled" : "disabled"}`);
-  });
   els.keyboardNameInput.addEventListener("input", () => {
     syncKeyboardName(els.keyboardNameInput.value, false);
     setDirty(true);

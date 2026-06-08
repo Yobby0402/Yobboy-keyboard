@@ -25,16 +25,17 @@ static const char *TAG = "keyboard_profile";
 #define PROFILE_IDLE_SCAN_INTERVAL_DEFAULT 100
 #define PROFILE_SOCD_DELAY_DEFAULT 10
 #define PROFILE_SOCD_DELAY_MAX 50
+#define PROFILE_REVERSE_TAP_DELAY_DEFAULT 0
 #define PROFILE_REVERSE_TAP_DURATION_DEFAULT 12
-#define PROFILE_REVERSE_TAP_DURATION_MAX 50
+#define PROFILE_REVERSE_TAP_MAX 50
 #define PROFILE_POWER_FLAGS_SOCD_ENABLED (1u << 0)
-#define PROFILE_POWER_FLAGS_SOCD_RANDOMIZE (1u << 1)
-#define PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED (1u << 2)
-#define PROFILE_POWER_FLAGS_REVERSE_TAP_RANDOMIZE (1u << 3)
-#define PROFILE_POWER_RESERVED_FLAGS 0
-#define PROFILE_POWER_RESERVED_SOCD_DELAY 1
-#define PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION 2
-#define PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY 3
+#define PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED (1u << 1)
+#define PROFILE_POWER_SOCD_DELAY_SHIFT 2
+#define PROFILE_POWER_REVERSE_DELAY_MIN_SHIFT 8
+#define PROFILE_POWER_REVERSE_DELAY_MAX_SHIFT 14
+#define PROFILE_POWER_REVERSE_DURATION_MIN_SHIFT 20
+#define PROFILE_POWER_REVERSE_DURATION_MAX_SHIFT 26
+#define PROFILE_POWER_RANGE_MASK 0x3Fu
 
 static keyboard_profile_t s_profile;
 static keyboard_profile_t s_pending_profile;
@@ -218,20 +219,162 @@ static uint8_t sanitize_scan_interval(uint8_t value, uint8_t fallback)
     return value;
 }
 
-static uint8_t sanitize_socd_delay(uint8_t value)
+static uint8_t sanitize_assist_delay(uint8_t value, uint8_t fallback)
 {
-    if (value > PROFILE_SOCD_DELAY_MAX) {
-        return PROFILE_SOCD_DELAY_DEFAULT;
+    if (value > PROFILE_REVERSE_TAP_MAX) {
+        return fallback;
     }
     return value;
 }
 
+static uint8_t sanitize_socd_delay(uint8_t value)
+{
+    return sanitize_assist_delay(value, PROFILE_SOCD_DELAY_DEFAULT);
+}
+
 static uint8_t sanitize_reverse_tap_duration(uint8_t value)
 {
-    if (value > PROFILE_REVERSE_TAP_DURATION_MAX) {
+    if (value == 0 || value > PROFILE_REVERSE_TAP_MAX) {
         return PROFILE_REVERSE_TAP_DURATION_DEFAULT;
     }
     return value;
+}
+
+static uint32_t power_reserved_word(const keyboard_power_profile_t *power)
+{
+    if (power == NULL) {
+        return 0;
+    }
+
+    return ((uint32_t)power->reserved[0]) |
+           ((uint32_t)power->reserved[1] << 8) |
+           ((uint32_t)power->reserved[2] << 16) |
+           ((uint32_t)power->reserved[3] << 24);
+}
+
+static void set_power_reserved_word(keyboard_power_profile_t *power, uint32_t word)
+{
+    if (power == NULL) {
+        return;
+    }
+
+    power->reserved[0] = (uint8_t)(word & 0xFF);
+    power->reserved[1] = (uint8_t)((word >> 8) & 0xFF);
+    power->reserved[2] = (uint8_t)((word >> 16) & 0xFF);
+    power->reserved[3] = (uint8_t)((word >> 24) & 0xFF);
+}
+
+static uint8_t packed_power_field(uint32_t word, uint8_t shift)
+{
+    return (uint8_t)((word >> shift) & PROFILE_POWER_RANGE_MASK);
+}
+
+static uint32_t pack_power_reserved(bool socd_enabled, uint8_t socd_delay,
+                                    bool reverse_tap_enabled,
+                                    uint8_t reverse_delay_min, uint8_t reverse_delay_max,
+                                    uint8_t reverse_duration_min, uint8_t reverse_duration_max)
+{
+    uint32_t word = 0;
+
+    if (socd_enabled) {
+        word |= PROFILE_POWER_FLAGS_SOCD_ENABLED;
+    }
+    if (reverse_tap_enabled) {
+        word |= PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED;
+    }
+
+    word |= ((uint32_t)sanitize_socd_delay(socd_delay) & PROFILE_POWER_RANGE_MASK)
+            << PROFILE_POWER_SOCD_DELAY_SHIFT;
+    word |= ((uint32_t)sanitize_assist_delay(reverse_delay_min, PROFILE_REVERSE_TAP_DELAY_DEFAULT) &
+             PROFILE_POWER_RANGE_MASK) << PROFILE_POWER_REVERSE_DELAY_MIN_SHIFT;
+    word |= ((uint32_t)sanitize_assist_delay(reverse_delay_max, PROFILE_REVERSE_TAP_DELAY_DEFAULT) &
+             PROFILE_POWER_RANGE_MASK) << PROFILE_POWER_REVERSE_DELAY_MAX_SHIFT;
+    word |= ((uint32_t)sanitize_reverse_tap_duration(reverse_duration_min) &
+             PROFILE_POWER_RANGE_MASK) << PROFILE_POWER_REVERSE_DURATION_MIN_SHIFT;
+    word |= ((uint32_t)sanitize_reverse_tap_duration(reverse_duration_max) &
+             PROFILE_POWER_RANGE_MASK) << PROFILE_POWER_REVERSE_DURATION_MAX_SHIFT;
+
+    return word;
+}
+
+static void unpack_power_reserved(const keyboard_power_profile_t *power,
+                                  bool *socd_enabled, uint8_t *socd_delay,
+                                  bool *reverse_tap_enabled,
+                                  uint8_t *reverse_delay_min, uint8_t *reverse_delay_max,
+                                  uint8_t *reverse_duration_min, uint8_t *reverse_duration_max)
+{
+    uint32_t word = power_reserved_word(power);
+
+    if (socd_enabled != NULL) {
+        *socd_enabled = (word & PROFILE_POWER_FLAGS_SOCD_ENABLED) != 0;
+    }
+    if (socd_delay != NULL) {
+        *socd_delay = sanitize_socd_delay(
+            packed_power_field(word, PROFILE_POWER_SOCD_DELAY_SHIFT));
+    }
+    if (reverse_tap_enabled != NULL) {
+        *reverse_tap_enabled = (word & PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED) != 0;
+    }
+    if (reverse_delay_min != NULL) {
+        *reverse_delay_min = sanitize_assist_delay(
+            packed_power_field(word, PROFILE_POWER_REVERSE_DELAY_MIN_SHIFT),
+            PROFILE_REVERSE_TAP_DELAY_DEFAULT);
+    }
+    if (reverse_delay_max != NULL) {
+        *reverse_delay_max = sanitize_assist_delay(
+            packed_power_field(word, PROFILE_POWER_REVERSE_DELAY_MAX_SHIFT),
+            PROFILE_REVERSE_TAP_DELAY_DEFAULT);
+    }
+    if (reverse_duration_min != NULL) {
+        *reverse_duration_min = sanitize_reverse_tap_duration(
+            packed_power_field(word, PROFILE_POWER_REVERSE_DURATION_MIN_SHIFT));
+    }
+    if (reverse_duration_max != NULL) {
+        *reverse_duration_max = sanitize_reverse_tap_duration(
+            packed_power_field(word, PROFILE_POWER_REVERSE_DURATION_MAX_SHIFT));
+    }
+}
+
+static uint8_t range_min_from_randomized(uint8_t max_value, bool randomized)
+{
+    if (!randomized || max_value <= 1) {
+        return max_value;
+    }
+    return 1;
+}
+
+static void migrate_power_reserved_v8(keyboard_power_profile_t *power)
+{
+    uint8_t old_flags = power->reserved[0];
+    uint8_t old_socd_delay = power->reserved[1];
+    uint8_t old_reverse_duration = power->reserved[2];
+    uint8_t old_reverse_delay = power->reserved[3];
+    bool reverse_randomized = (old_flags & (1u << 3)) != 0;
+
+    set_power_reserved_word(power,
+                            pack_power_reserved((old_flags & (1u << 0)) != 0,
+                                                old_socd_delay,
+                                                (old_flags & (1u << 2)) != 0,
+                                                range_min_from_randomized(old_reverse_delay,
+                                                                          reverse_randomized),
+                                                old_reverse_delay,
+                                                range_min_from_randomized(old_reverse_duration,
+                                                                          reverse_randomized),
+                                                old_reverse_duration));
+}
+
+static void migrate_power_reserved_v5_to_v7(keyboard_power_profile_t *power,
+                                            bool old_socd_enabled,
+                                            uint8_t old_socd_delay)
+{
+    set_power_reserved_word(power,
+                            pack_power_reserved(old_socd_enabled,
+                                                old_socd_delay,
+                                                false,
+                                                PROFILE_REVERSE_TAP_DELAY_DEFAULT,
+                                                PROFILE_REVERSE_TAP_DELAY_DEFAULT,
+                                                PROFILE_REVERSE_TAP_DURATION_DEFAULT,
+                                                PROFILE_REVERSE_TAP_DURATION_DEFAULT));
 }
 
 static void sanitize_power_profile(keyboard_power_profile_t *power)
@@ -247,16 +390,40 @@ static void sanitize_power_profile(keyboard_power_profile_t *power)
     power->scan_interval_saver_ms = sanitize_scan_interval(power->scan_interval_saver_ms, 8);
     power->idle_scan_interval_ms = sanitize_scan_interval(power->idle_scan_interval_ms,
                                                           PROFILE_IDLE_SCAN_INTERVAL_DEFAULT);
-    power->reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] =
-        sanitize_socd_delay(power->reserved[PROFILE_POWER_RESERVED_SOCD_DELAY]);
-    power->reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] =
-        sanitize_reverse_tap_duration(power->reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION]);
-    power->reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] =
-        sanitize_reverse_tap_duration(power->reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY]);
-    power->reserved[PROFILE_POWER_RESERVED_FLAGS] &= (PROFILE_POWER_FLAGS_SOCD_ENABLED |
-                                                      PROFILE_POWER_FLAGS_SOCD_RANDOMIZE |
-                                                      PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED |
-                                                      PROFILE_POWER_FLAGS_REVERSE_TAP_RANDOMIZE);
+    bool socd_enabled = false;
+    bool reverse_tap_enabled = false;
+    uint8_t socd_delay = PROFILE_SOCD_DELAY_DEFAULT;
+    uint8_t reverse_delay_min = PROFILE_REVERSE_TAP_DELAY_DEFAULT;
+    uint8_t reverse_delay_max = PROFILE_REVERSE_TAP_DELAY_DEFAULT;
+    uint8_t reverse_duration_min = PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+    uint8_t reverse_duration_max = PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+
+    unpack_power_reserved(power,
+                          &socd_enabled,
+                          &socd_delay,
+                          &reverse_tap_enabled,
+                          &reverse_delay_min,
+                          &reverse_delay_max,
+                          &reverse_duration_min,
+                          &reverse_duration_max);
+    if (reverse_delay_min > reverse_delay_max) {
+        uint8_t tmp = reverse_delay_min;
+        reverse_delay_min = reverse_delay_max;
+        reverse_delay_max = tmp;
+    }
+    if (reverse_duration_min > reverse_duration_max) {
+        uint8_t tmp = reverse_duration_min;
+        reverse_duration_min = reverse_duration_max;
+        reverse_duration_max = tmp;
+    }
+    set_power_reserved_word(power,
+                            pack_power_reserved(socd_enabled,
+                                                socd_delay,
+                                                reverse_tap_enabled,
+                                                reverse_delay_min,
+                                                reverse_delay_max,
+                                                reverse_duration_min,
+                                                reverse_duration_max));
 }
 
 static void reset_runtime_power_mode(void)
@@ -473,10 +640,14 @@ void keyboard_profile_set_default(keyboard_profile_t *profile)
     profile->power.idle_enter_low_power_ms = 15000;
     profile->power.idle_enter_deep_sleep_ms = 180000;
     memset(profile->power.reserved, 0, sizeof(profile->power.reserved));
-    profile->power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] = PROFILE_SOCD_DELAY_DEFAULT;
-    profile->power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] =
-        PROFILE_REVERSE_TAP_DURATION_DEFAULT;
-    profile->power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] = 0;
+    set_power_reserved_word(&profile->power,
+                            pack_power_reserved(false,
+                                                PROFILE_SOCD_DELAY_DEFAULT,
+                                                false,
+                                                PROFILE_REVERSE_TAP_DELAY_DEFAULT,
+                                                PROFILE_REVERSE_TAP_DELAY_DEFAULT,
+                                                PROFILE_REVERSE_TAP_DURATION_DEFAULT,
+                                                PROFILE_REVERSE_TAP_DURATION_DEFAULT));
     sanitize_power_profile(&profile->power);
 
     profile_fix_checksum(profile);
@@ -532,15 +703,30 @@ bool keyboard_profile_validate(const keyboard_profile_t *profile)
         profile->power.scan_interval_saver_ms < PROFILE_SCAN_INTERVAL_MIN ||
         profile->power.scan_interval_saver_ms > PROFILE_SCAN_INTERVAL_MAX ||
         profile->power.idle_scan_interval_ms < PROFILE_SCAN_INTERVAL_MIN ||
-        profile->power.idle_scan_interval_ms > PROFILE_SCAN_INTERVAL_MAX ||
-        (profile->power.reserved[PROFILE_POWER_RESERVED_FLAGS] &
-         ~(PROFILE_POWER_FLAGS_SOCD_ENABLED |
-           PROFILE_POWER_FLAGS_SOCD_RANDOMIZE |
-           PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED |
-           PROFILE_POWER_FLAGS_REVERSE_TAP_RANDOMIZE)) != 0 ||
-        profile->power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] > PROFILE_SOCD_DELAY_MAX ||
-        profile->power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] > PROFILE_REVERSE_TAP_DURATION_MAX ||
-        profile->power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] > PROFILE_REVERSE_TAP_DURATION_MAX) {
+        profile->power.idle_scan_interval_ms > PROFILE_SCAN_INTERVAL_MAX) {
+        return false;
+    }
+
+    uint8_t socd_delay = 0;
+    uint8_t reverse_delay_min = 0;
+    uint8_t reverse_delay_max = 0;
+    uint8_t reverse_duration_min = 0;
+    uint8_t reverse_duration_max = 0;
+    unpack_power_reserved(&profile->power,
+                          NULL,
+                          &socd_delay,
+                          NULL,
+                          &reverse_delay_min,
+                          &reverse_delay_max,
+                          &reverse_duration_min,
+                          &reverse_duration_max);
+    if (socd_delay > PROFILE_SOCD_DELAY_MAX ||
+        reverse_delay_min > PROFILE_REVERSE_TAP_MAX ||
+        reverse_delay_max > PROFILE_REVERSE_TAP_MAX ||
+        reverse_duration_min > PROFILE_REVERSE_TAP_MAX ||
+        reverse_duration_max > PROFILE_REVERSE_TAP_MAX ||
+        reverse_delay_min > reverse_delay_max ||
+        reverse_duration_min > reverse_duration_max) {
         return false;
     }
 
@@ -548,7 +734,7 @@ bool keyboard_profile_validate(const keyboard_profile_t *profile)
     for (uint8_t layer = 0; layer < YBK_LAYER_COUNT; layer++) {
         for (uint8_t key = 0; key < YBK_MAX_KEYS; key++) {
             uint8_t type = profile->keymap[layer][key].type;
-            if (type > YBK_ACTION_POWER_MODE_NEXT) {
+            if (type > YBK_ACTION_WASD_ASSIST_TOGGLE) {
                 return false;
             }
             if (type == YBK_ACTION_KEY ||
@@ -579,56 +765,54 @@ static esp_err_t load_profile_from_nvs(keyboard_profile_t *profile)
     }
 
     if (size == sizeof(*profile)) {
-        keyboard_profile_t stored = {0};
-        ret = nvs_get_blob(handle, PROFILE_NVS_KEY, &stored, &size);
+        ret = nvs_get_blob(handle, PROFILE_NVS_KEY, profile, &size);
         nvs_close(handle);
 
         if (ret != ESP_OK) {
             return ret;
         }
 
-        if (stored.magic != YBK_PROFILE_MAGIC || stored.size != sizeof(stored)) {
+        if (profile->magic != YBK_PROFILE_MAGIC || profile->size != sizeof(*profile)) {
             return ESP_ERR_INVALID_CRC;
         }
 
-        if (stored.checksum != 0 && stored.checksum != calculate_profile_checksum(&stored)) {
+        if (profile->checksum != 0 && profile->checksum != calculate_profile_checksum(profile)) {
             return ESP_ERR_INVALID_CRC;
         }
 
-        if (stored.version == YBK_PROFILE_VERSION) {
-            if (!keyboard_profile_validate(&stored)) {
+        if (profile->version == YBK_PROFILE_VERSION) {
+            if (!keyboard_profile_validate(profile)) {
                 return ESP_ERR_INVALID_CRC;
             }
-            sanitize_power_profile(&stored.power);
-            sanitize_lighting_runtime_profile(&stored);
-            *profile = stored;
+            sanitize_power_profile(&profile->power);
+            sanitize_lighting_runtime_profile(profile);
             return ESP_OK;
         }
 
-        if (stored.version == 7 || stored.version == 6 || stored.version == 5) {
-            keyboard_profile_t migrated = stored;
-            migrated.version = YBK_PROFILE_VERSION;
-            uint8_t old_socd_enabled = migrated.power.reserved[0];
-            uint8_t old_socd_delay = migrated.power.reserved[1];
-            uint8_t old_socd_randomize = migrated.power.reserved[2];
-            memset(migrated.power.reserved, 0, sizeof(migrated.power.reserved));
-            if (old_socd_enabled) {
-                migrated.power.reserved[PROFILE_POWER_RESERVED_FLAGS] |= PROFILE_POWER_FLAGS_SOCD_ENABLED;
+        if (profile->version == 8) {
+            profile->version = YBK_PROFILE_VERSION;
+            migrate_power_reserved_v8(&profile->power);
+            sanitize_power_profile(&profile->power);
+            sanitize_lighting_runtime_profile(profile);
+            profile_fix_checksum(profile);
+            return ESP_OK;
+        }
+
+        if (profile->version == 7 || profile->version == 6 || profile->version == 5) {
+            uint16_t stored_version = profile->version;
+            uint8_t old_socd_enabled = profile->power.reserved[0];
+            uint8_t old_socd_delay = profile->power.reserved[1];
+            profile->version = YBK_PROFILE_VERSION;
+            memset(profile->power.reserved, 0, sizeof(profile->power.reserved));
+            migrate_power_reserved_v5_to_v7(&profile->power,
+                                            old_socd_enabled != 0,
+                                            old_socd_delay);
+            if (stored_version == 5) {
+                profile->lighting_reserved[0] = 0;
             }
-            if (old_socd_randomize) {
-                migrated.power.reserved[PROFILE_POWER_RESERVED_FLAGS] |= PROFILE_POWER_FLAGS_SOCD_RANDOMIZE;
-            }
-            migrated.power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] = old_socd_delay;
-            migrated.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] =
-                PROFILE_REVERSE_TAP_DURATION_DEFAULT;
-            migrated.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] = 0;
-            if (stored.version == 5) {
-                migrated.lighting_reserved[0] = 0;
-            }
-            sanitize_power_profile(&migrated.power);
-            sanitize_lighting_runtime_profile(&migrated);
-            profile_fix_checksum(&migrated);
-            *profile = migrated;
+            sanitize_power_profile(&profile->power);
+            sanitize_lighting_runtime_profile(profile);
+            profile_fix_checksum(profile);
             return ESP_OK;
         }
 
@@ -649,14 +833,13 @@ static esp_err_t load_profile_from_nvs(keyboard_profile_t *profile)
             return ESP_ERR_INVALID_CRC;
         }
 
-        keyboard_profile_t migrated = {0};
-        keyboard_profile_set_default(&migrated);
-        memcpy(migrated.keymap, legacy.keymap, sizeof(migrated.keymap));
-        migrated.power = legacy.power;
-        migrated.lighting_active_preset = sanitize_active_lighting_preset(legacy.lighting_active_preset);
-        memset(migrated.lighting_reserved, 0, sizeof(migrated.lighting_reserved));
+        keyboard_profile_set_default(profile);
+        memcpy(profile->keymap, legacy.keymap, sizeof(profile->keymap));
+        profile->power = legacy.power;
+        profile->lighting_active_preset = sanitize_active_lighting_preset(legacy.lighting_active_preset);
+        memset(profile->lighting_reserved, 0, sizeof(profile->lighting_reserved));
         for (uint8_t i = 0; i < YBK_LIGHTING_PRESET_COUNT; i++) {
-            lighting_preset_set(&migrated.lighting_presets[i],
+            lighting_preset_set(&profile->lighting_presets[i],
                                 legacy.lighting_presets[i].enabled != 0,
                                 legacy.lighting_presets[i].mode,
                                 legacy.lighting_presets[i].brightness,
@@ -665,10 +848,9 @@ static esp_err_t load_profile_from_nvs(keyboard_profile_t *profile)
                                 legacy.lighting_presets[i].green,
                                 legacy.lighting_presets[i].blue);
         }
-        sanitize_power_profile(&migrated.power);
-        sanitize_lighting_runtime_profile(&migrated);
-        profile_fix_checksum(&migrated);
-        *profile = migrated;
+        sanitize_power_profile(&profile->power);
+        sanitize_lighting_runtime_profile(profile);
+        profile_fix_checksum(profile);
         return ESP_OK;
     }
 
@@ -686,12 +868,11 @@ static esp_err_t load_profile_from_nvs(keyboard_profile_t *profile)
             return ESP_ERR_INVALID_CRC;
         }
 
-        keyboard_profile_t migrated = {0};
-        keyboard_profile_set_default(&migrated);
-        memcpy(migrated.keymap, legacy.keymap, sizeof(migrated.keymap));
-        migrated.power = legacy.power;
-        memset(migrated.lighting_reserved, 0, sizeof(migrated.lighting_reserved));
-        lighting_preset_set(&migrated.lighting_presets[0],
+        keyboard_profile_set_default(profile);
+        memcpy(profile->keymap, legacy.keymap, sizeof(profile->keymap));
+        profile->power = legacy.power;
+        memset(profile->lighting_reserved, 0, sizeof(profile->lighting_reserved));
+        lighting_preset_set(&profile->lighting_presets[0],
                             legacy.led_enabled != 0,
                             legacy.led_mode,
                             legacy.led_brightness,
@@ -699,11 +880,10 @@ static esp_err_t load_profile_from_nvs(keyboard_profile_t *profile)
                             legacy.led_color_r,
                             legacy.led_color_g,
                             legacy.led_color_b);
-        migrated.lighting_active_preset = 0;
-        sanitize_power_profile(&migrated.power);
-        sanitize_lighting_runtime_profile(&migrated);
-        profile_fix_checksum(&migrated);
-        *profile = migrated;
+        profile->lighting_active_preset = 0;
+        sanitize_power_profile(&profile->power);
+        sanitize_lighting_runtime_profile(profile);
+        profile_fix_checksum(profile);
         return ESP_OK;
     }
 
@@ -715,19 +895,18 @@ static esp_err_t load_profile_from_nvs(keyboard_profile_t *profile)
 #endif
 }
 
-static esp_err_t save_profile_to_nvs(const keyboard_profile_t *profile)
+static esp_err_t save_profile_to_nvs(keyboard_profile_t *profile)
 {
 #ifdef CONFIG_NVS_STORAGE_ENABLE
     nvs_handle_t handle;
-    keyboard_profile_t copy = *profile;
-    profile_fix_checksum(&copy);
+    profile_fix_checksum(profile);
 
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
         return ret;
     }
 
-    ret = nvs_set_blob(handle, PROFILE_NVS_KEY, &copy, sizeof(copy));
+    ret = nvs_set_blob(handle, PROFILE_NVS_KEY, profile, sizeof(*profile));
     if (ret == ESP_OK) {
         ret = nvs_commit(handle);
     }
@@ -864,15 +1043,12 @@ esp_err_t keyboard_profile_init(void)
 {
     keyboard_profile_set_default(&s_profile);
 
-    keyboard_profile_t loaded;
-    esp_err_t ret = load_profile_from_nvs(&loaded);
+    esp_err_t ret = load_profile_from_nvs(&s_profile);
     if (ret == ESP_OK) {
-        s_profile = loaded;
-        sanitize_power_profile(&s_profile.power);
-        sanitize_lighting_runtime_profile(&s_profile);
         ESP_LOGI(TAG, "Profile loaded: checksum=0x%08lx", (unsigned long)s_profile.checksum);
     } else {
         ESP_LOGW(TAG, "Using default profile: %s", esp_err_to_name(ret));
+        keyboard_profile_set_default(&s_profile);
         ESP_ERROR_CHECK_WITHOUT_ABORT(save_profile_to_nvs(&s_profile));
     }
 
@@ -939,41 +1115,51 @@ uint32_t keyboard_profile_get_idle_enter_deep_sleep_ms(void)
 
 bool keyboard_profile_socd_enabled(void)
 {
-    return (s_profile.power.reserved[PROFILE_POWER_RESERVED_FLAGS] & PROFILE_POWER_FLAGS_SOCD_ENABLED) != 0;
+    bool enabled = false;
+    unpack_power_reserved(&s_profile.power, &enabled, NULL, NULL, NULL, NULL, NULL, NULL);
+    return enabled;
 }
 
 uint8_t keyboard_profile_socd_delay_ms(void)
 {
-    return sanitize_socd_delay(s_profile.power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY]);
-}
-
-bool keyboard_profile_socd_randomize(void)
-{
-    return (s_profile.power.reserved[PROFILE_POWER_RESERVED_FLAGS] & PROFILE_POWER_FLAGS_SOCD_RANDOMIZE) != 0;
+    uint8_t delay = PROFILE_SOCD_DELAY_DEFAULT;
+    unpack_power_reserved(&s_profile.power, NULL, &delay, NULL, NULL, NULL, NULL, NULL);
+    return delay;
 }
 
 bool keyboard_profile_reverse_tap_enabled(void)
 {
-    return (s_profile.power.reserved[PROFILE_POWER_RESERVED_FLAGS] &
-            PROFILE_POWER_FLAGS_REVERSE_TAP_ENABLED) != 0;
+    bool enabled = false;
+    unpack_power_reserved(&s_profile.power, NULL, NULL, &enabled, NULL, NULL, NULL, NULL);
+    return enabled;
 }
 
-uint8_t keyboard_profile_reverse_tap_delay_ms(void)
+uint8_t keyboard_profile_reverse_tap_delay_min_ms(void)
 {
-    return sanitize_reverse_tap_duration(
-        s_profile.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY]);
+    uint8_t delay_min = PROFILE_REVERSE_TAP_DELAY_DEFAULT;
+    unpack_power_reserved(&s_profile.power, NULL, NULL, NULL, &delay_min, NULL, NULL, NULL);
+    return delay_min;
 }
 
-uint8_t keyboard_profile_reverse_tap_duration_ms(void)
+uint8_t keyboard_profile_reverse_tap_delay_max_ms(void)
 {
-    return sanitize_reverse_tap_duration(
-        s_profile.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION]);
+    uint8_t delay_max = PROFILE_REVERSE_TAP_DELAY_DEFAULT;
+    unpack_power_reserved(&s_profile.power, NULL, NULL, NULL, NULL, &delay_max, NULL, NULL);
+    return delay_max;
 }
 
-bool keyboard_profile_reverse_tap_randomize(void)
+uint8_t keyboard_profile_reverse_tap_duration_min_ms(void)
 {
-    return (s_profile.power.reserved[PROFILE_POWER_RESERVED_FLAGS] &
-            PROFILE_POWER_FLAGS_REVERSE_TAP_RANDOMIZE) != 0;
+    uint8_t duration_min = PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+    unpack_power_reserved(&s_profile.power, NULL, NULL, NULL, NULL, NULL, &duration_min, NULL);
+    return duration_min;
+}
+
+uint8_t keyboard_profile_reverse_tap_duration_max_ms(void)
+{
+    uint8_t duration_max = PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+    unpack_power_reserved(&s_profile.power, NULL, NULL, NULL, NULL, NULL, NULL, &duration_max);
+    return duration_max;
 }
 
 bool keyboard_profile_allow_power_mode_cycle(void)
@@ -1003,50 +1189,123 @@ bool keyboard_profile_cycle_power_mode(void)
     return true;
 }
 
+static bool set_socd_enabled_runtime(bool enabled)
+{
+    bool socd_enabled = false;
+    bool reverse_tap_enabled = false;
+    uint8_t socd_delay = PROFILE_SOCD_DELAY_DEFAULT;
+    uint8_t reverse_delay_min = PROFILE_REVERSE_TAP_DELAY_DEFAULT;
+    uint8_t reverse_delay_max = PROFILE_REVERSE_TAP_DELAY_DEFAULT;
+    uint8_t reverse_duration_min = PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+    uint8_t reverse_duration_max = PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+
+    unpack_power_reserved(&s_profile.power,
+                          &socd_enabled,
+                          &socd_delay,
+                          &reverse_tap_enabled,
+                          &reverse_delay_min,
+                          &reverse_delay_max,
+                          &reverse_duration_min,
+                          &reverse_duration_max);
+    socd_enabled = enabled;
+    set_power_reserved_word(&s_profile.power,
+                            pack_power_reserved(socd_enabled,
+                                                socd_delay,
+                                                reverse_tap_enabled,
+                                                reverse_delay_min,
+                                                reverse_delay_max,
+                                                reverse_duration_min,
+                                                reverse_duration_max));
+    return socd_enabled;
+}
+
+static bool set_reverse_tap_enabled_runtime(bool enabled)
+{
+    bool socd_enabled = false;
+    bool reverse_tap_enabled = false;
+    uint8_t socd_delay = PROFILE_SOCD_DELAY_DEFAULT;
+    uint8_t reverse_delay_min = PROFILE_REVERSE_TAP_DELAY_DEFAULT;
+    uint8_t reverse_delay_max = PROFILE_REVERSE_TAP_DELAY_DEFAULT;
+    uint8_t reverse_duration_min = PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+    uint8_t reverse_duration_max = PROFILE_REVERSE_TAP_DURATION_DEFAULT;
+
+    unpack_power_reserved(&s_profile.power,
+                          &socd_enabled,
+                          &socd_delay,
+                          &reverse_tap_enabled,
+                          &reverse_delay_min,
+                          &reverse_delay_max,
+                          &reverse_duration_min,
+                          &reverse_duration_max);
+    reverse_tap_enabled = enabled;
+    set_power_reserved_word(&s_profile.power,
+                            pack_power_reserved(socd_enabled,
+                                                socd_delay,
+                                                reverse_tap_enabled,
+                                                reverse_delay_min,
+                                                reverse_delay_max,
+                                                reverse_duration_min,
+                                                reverse_duration_max));
+    return reverse_tap_enabled;
+}
+
+bool keyboard_profile_toggle_socd_enabled(void)
+{
+    return set_socd_enabled_runtime(!keyboard_profile_socd_enabled());
+}
+
+bool keyboard_profile_toggle_reverse_tap_enabled(void)
+{
+    return set_reverse_tap_enabled_runtime(!keyboard_profile_reverse_tap_enabled());
+}
+
+void keyboard_profile_toggle_wasd_assists(void)
+{
+    bool enable = !(keyboard_profile_socd_enabled() && keyboard_profile_reverse_tap_enabled());
+    set_socd_enabled_runtime(enable);
+    set_reverse_tap_enabled_runtime(enable);
+}
+
 esp_err_t keyboard_profile_stage(const uint8_t *data, size_t len)
 {
     if (data == NULL || len != sizeof(keyboard_profile_t)) {
         return ESP_ERR_INVALID_SIZE;
     }
 
-    keyboard_profile_t candidate;
-    memcpy(&candidate, data, sizeof(candidate));
-    uint16_t original_version = candidate.version;
-    if (original_version == 7 || original_version == 6 || original_version == 5) {
-        uint8_t old_socd_enabled = candidate.power.reserved[0];
-        uint8_t old_socd_delay = candidate.power.reserved[1];
-        uint8_t old_socd_randomize = candidate.power.reserved[2];
-        candidate.version = YBK_PROFILE_VERSION;
-        memset(candidate.power.reserved, 0, sizeof(candidate.power.reserved));
-        if (old_socd_enabled) {
-            candidate.power.reserved[PROFILE_POWER_RESERVED_FLAGS] |= PROFILE_POWER_FLAGS_SOCD_ENABLED;
-        }
-        if (old_socd_randomize) {
-            candidate.power.reserved[PROFILE_POWER_RESERVED_FLAGS] |= PROFILE_POWER_FLAGS_SOCD_RANDOMIZE;
-        }
-        candidate.power.reserved[PROFILE_POWER_RESERVED_SOCD_DELAY] = old_socd_delay;
-        candidate.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DURATION] =
-            PROFILE_REVERSE_TAP_DURATION_DEFAULT;
-        candidate.power.reserved[PROFILE_POWER_RESERVED_REVERSE_TAP_DELAY] = 0;
-        if (original_version == 5) {
-            candidate.lighting_reserved[0] = 0;
-            candidate.lighting_reserved[1] = 0;
-            candidate.lighting_reserved[2] = 0;
-        }
-        candidate.checksum = 0;
+    s_pending_valid = false;
+    memcpy(&s_pending_profile, data, sizeof(s_pending_profile));
+    uint16_t original_version = s_pending_profile.version;
+    if (original_version == 8) {
+        s_pending_profile.version = YBK_PROFILE_VERSION;
+        migrate_power_reserved_v8(&s_pending_profile.power);
+        s_pending_profile.checksum = 0;
     }
-    if (candidate.checksum == 0) {
-        profile_fix_checksum(&candidate);
+    if (original_version == 7 || original_version == 6 || original_version == 5) {
+        uint8_t old_socd_enabled = s_pending_profile.power.reserved[0];
+        uint8_t old_socd_delay = s_pending_profile.power.reserved[1];
+        s_pending_profile.version = YBK_PROFILE_VERSION;
+        memset(s_pending_profile.power.reserved, 0, sizeof(s_pending_profile.power.reserved));
+        migrate_power_reserved_v5_to_v7(&s_pending_profile.power,
+                                        old_socd_enabled != 0,
+                                        old_socd_delay);
+        if (original_version == 5) {
+            s_pending_profile.lighting_reserved[0] = 0;
+            s_pending_profile.lighting_reserved[1] = 0;
+            s_pending_profile.lighting_reserved[2] = 0;
+        }
+        s_pending_profile.checksum = 0;
+    }
+    if (s_pending_profile.checksum == 0) {
+        profile_fix_checksum(&s_pending_profile);
     }
 
-    if (!keyboard_profile_validate(&candidate)) {
+    if (!keyboard_profile_validate(&s_pending_profile)) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    sanitize_power_profile(&candidate.power);
-    sanitize_lighting_runtime_profile(&candidate);
-    profile_fix_checksum(&candidate);
-    s_pending_profile = candidate;
+    sanitize_power_profile(&s_pending_profile.power);
+    sanitize_lighting_runtime_profile(&s_pending_profile);
+    profile_fix_checksum(&s_pending_profile);
     s_pending_valid = true;
     return ESP_OK;
 }

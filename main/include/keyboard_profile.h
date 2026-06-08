@@ -12,7 +12,7 @@ extern "C" {
 #endif
 
 #define YBK_PROFILE_MAGIC 0x504B4259u /* "YBKP" little-endian */
-#define YBK_PROFILE_VERSION 8
+#define YBK_PROFILE_VERSION 9
 #define YBK_MAX_KEYS 80
 #define YBK_LAYER_COUNT 2
 #define YBK_LIGHTING_PRESET_COUNT 6
@@ -34,6 +34,9 @@ typedef enum {
     YBK_ACTION_LED_BRIGHTNESS_DOWN = 7,
     YBK_ACTION_LED_EFFECT_NEXT = 8,
     YBK_ACTION_POWER_MODE_NEXT = 9,
+    YBK_ACTION_SOCD_TOGGLE = 10,
+    YBK_ACTION_REVERSE_TAP_TOGGLE = 11,
+    YBK_ACTION_WASD_ASSIST_TOGGLE = 12,
 } keyboard_action_type_t;
 
 typedef enum {
@@ -118,13 +121,16 @@ uint16_t keyboard_profile_get_idle_enter_low_power_ms(void);
 uint32_t keyboard_profile_get_idle_enter_deep_sleep_ms(void);
 bool keyboard_profile_socd_enabled(void);
 uint8_t keyboard_profile_socd_delay_ms(void);
-bool keyboard_profile_socd_randomize(void);
 bool keyboard_profile_reverse_tap_enabled(void);
-uint8_t keyboard_profile_reverse_tap_delay_ms(void);
-uint8_t keyboard_profile_reverse_tap_duration_ms(void);
-bool keyboard_profile_reverse_tap_randomize(void);
+uint8_t keyboard_profile_reverse_tap_delay_min_ms(void);
+uint8_t keyboard_profile_reverse_tap_delay_max_ms(void);
+uint8_t keyboard_profile_reverse_tap_duration_min_ms(void);
+uint8_t keyboard_profile_reverse_tap_duration_max_ms(void);
 bool keyboard_profile_allow_power_mode_cycle(void);
 bool keyboard_profile_cycle_power_mode(void);
+bool keyboard_profile_toggle_socd_enabled(void);
+bool keyboard_profile_toggle_reverse_tap_enabled(void);
+void keyboard_profile_toggle_wasd_assists(void);
 
 esp_err_t keyboard_profile_stage(const uint8_t *data, size_t len);
 esp_err_t keyboard_profile_commit_staged(void);

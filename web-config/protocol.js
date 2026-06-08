@@ -1,6 +1,6 @@
 export const PROFILE = {
   MAGIC: 0x504B4259,
-  VERSION: 8,
+  VERSION: 9,
   SIZE: 2700,
   MAX_KEYS: 80,
   LAYERS: 2,
@@ -70,8 +70,22 @@ export const LIGHTING_TOPOLOGY = {
   VERSION: 1,
   MAX_LAMPS: 80,
   ACTIVE_LAMPS: 71,
-  SIZE: 1050,
+  SIZE: 1052,
   NO_KEY: 0xff,
+};
+
+const POWER_FLAGS = {
+  SOCD_ENABLED: 0x01,
+  REVERSE_TAP_ENABLED: 0x02,
+};
+
+const POWER_BITS = {
+  SOCD_DELAY_SHIFT: 2,
+  REVERSE_DELAY_MIN_SHIFT: 8,
+  REVERSE_DELAY_MAX_SHIFT: 14,
+  REVERSE_DURATION_MIN_SHIFT: 20,
+  REVERSE_DURATION_MAX_SHIFT: 26,
+  RANGE_MASK: 0x3f,
 };
 
 export const STATUS = {
@@ -120,7 +134,9 @@ class YbkFrameTransport {
     this.seq = 1;
     this.rx = new Uint8Array();
     this.pending = new Map();
+    this.commandQueue = Promise.resolve();
     this._connected = false;
+    this.onDisconnect = null;
   }
 
   get connected() {
@@ -130,6 +146,7 @@ class YbkFrameTransport {
   resetSession() {
     this.seq = 1;
     this.rx = new Uint8Array();
+    this.commandQueue = Promise.resolve();
     this.rejectPending(new Error("Transport disconnected"));
   }
 
@@ -186,7 +203,18 @@ class YbkFrameTransport {
   }
 
   async command(type, payload = new Uint8Array(), timeoutMs = 1600) {
+    return this.enqueueCommand(() => this.commandNow(type, payload, timeoutMs));
+  }
+
+  enqueueCommand(run) {
+    const next = this.commandQueue.catch(() => {}).then(run);
+    this.commandQueue = next.catch(() => {});
+    return next;
+  }
+
+  async commandNow(type, payload = new Uint8Array(), timeoutMs = 1600) {
     if (!this.connected) throw new Error("Device is not connected");
+    const requestLength = payload?.byteLength ?? payload?.length ?? 0;
     const seq = this.seq++ & 0xff;
     const responseType = type | 0x80;
     const key = `${responseType}:${seq}`;
@@ -209,11 +237,18 @@ class YbkFrameTransport {
     await this.writeFrame(frame(type, seq, payload));
     const response = await wait;
     const status = response[0] ?? 0xff;
+    const statusText = STATUS[status] || `STATUS_${status}`;
     return {
       status,
-      statusText: STATUS[status] || `STATUS_${status}`,
+      statusText: status === 0
+        ? statusText
+        : `${statusText} cmd=0x${type.toString(16)} len=${requestLength}`,
       data: response.subarray(1),
     };
+  }
+
+  notifyDisconnected() {
+    this.onDisconnect?.();
   }
 }
 
@@ -223,32 +258,78 @@ export class YbkSerial extends YbkFrameTransport {
     this.port = null;
     this.reader = null;
     this.writer = null;
+    this.readLoopPromise = null;
+    this.disconnectPromise = null;
   }
 
   async connect() {
+    if (this.disconnectPromise) {
+      await this.disconnectPromise;
+    }
     if (!("serial" in navigator)) {
       throw new Error("WebSerial is not available in this browser");
     }
     this.port = await navigator.serial.requestPort();
     await this.port.open({ baudRate: 115200 });
+    if (typeof this.port.setSignals === "function") {
+      await this.port.setSignals({ dataTerminalReady: true, requestToSend: true });
+    }
     this.reader = this.port.readable.getReader();
     this.writer = this.port.writable.getWriter();
     this._connected = true;
-    this.readLoop();
+    this.readLoopPromise = this.readLoop();
   }
 
   async disconnect() {
+    if (this.disconnectPromise) {
+      return this.disconnectPromise;
+    }
+    this.disconnectPromise = this.disconnectNow().finally(() => {
+      this.disconnectPromise = null;
+    });
+    return this.disconnectPromise;
+  }
+
+  async disconnectNow() {
     this._connected = false;
     this.resetSession();
+    const loop = this.readLoopPromise;
     try {
       await this.reader?.cancel();
-      this.reader?.releaseLock();
-      this.writer?.releaseLock();
-      await this.port?.close();
-    } finally {
-      this.reader = null;
-      this.writer = null;
-      this.port = null;
+    } catch {
+      // The read loop may already be unwinding after a device removal.
+    }
+    if (loop) {
+      await loop;
+      return;
+    }
+    await this.closeResources();
+  }
+
+  async closeResources() {
+    const reader = this.reader;
+    const writer = this.writer;
+    const port = this.port;
+    this.reader = null;
+    this.writer = null;
+    this.port = null;
+
+    try {
+      reader?.releaseLock();
+    } catch {
+      // ignore
+    }
+    try {
+      writer?.releaseLock();
+    } catch {
+      // ignore
+    }
+    try {
+      await port?.close?.();
+    } catch (error) {
+      if (!/close\(\) is already in progress|close.*already.*progress/i.test(error?.message || "")) {
+        this.log(`[SERIAL] Close failed: ${error.message}`);
+      }
     }
   }
 
@@ -262,8 +343,14 @@ export class YbkSerial extends YbkFrameTransport {
     } catch (error) {
       this.log(`[SERIAL] ${error.message}`);
     } finally {
+      const wasConnected = this._connected;
       this._connected = false;
       this.resetSession();
+      await this.closeResources();
+      this.readLoopPromise = null;
+      if (wasConnected) {
+        this.notifyDisconnected();
+      }
     }
   }
 
@@ -284,6 +371,8 @@ export function decodeBleStatus(bytes) {
     currentMode: bytes[2],
     activeScanIntervalMs: bytes[3],
     flags: bytes[4],
+    socdEnabled: bytes[0] >= 4 ? bytes[5] !== 0 : null,
+    reverseTapEnabled: bytes[0] >= 4 ? bytes[6] !== 0 : null,
     profileChecksum: view.getUint32(8, true),
     idleMs: view.getUint32(12, true),
   };
@@ -311,6 +400,7 @@ export class YbkBluetooth extends YbkFrameTransport {
       this._connected = false;
       this.resetSession();
       this.log("[BLE] Disconnected");
+      this.onDisconnect?.();
     };
   }
 
@@ -402,10 +492,15 @@ export function createEmptyProfile() {
   bytes[PROFILE.POWER_OFFSET + 5] = 100;
   view.setUint16(PROFILE.POWER_OFFSET + 6, 15000, true);
   view.setUint32(PROFILE.POWER_OFFSET + 8, 180000, true);
-  bytes[PROFILE.POWER_OFFSET + 12] = 0;
-  bytes[PROFILE.POWER_OFFSET + 13] = 10;
-  bytes[PROFILE.POWER_OFFSET + 14] = 12;
-  bytes[PROFILE.POWER_OFFSET + 15] = 0;
+  view.setUint32(PROFILE.POWER_OFFSET + 12, packPowerAssist({
+    socdEnabled: false,
+    socdDelayMs: 10,
+    reverseTapEnabled: false,
+    reverseTapDelayMinMs: 0,
+    reverseTapDelayMaxMs: 0,
+    reverseTapDurationMinMs: 12,
+    reverseTapDurationMaxMs: 12,
+  }), true);
   return bytes;
 }
 
@@ -418,7 +513,7 @@ export function validateProfile(profile) {
   const view = new DataView(profile.buffer, profile.byteOffset, profile.byteLength);
   const version = view.getUint16(4, true);
   return view.getUint32(0, true) === PROFILE.MAGIC &&
-    (version === 5 || version === 6 || version === 7 || version === PROFILE.VERSION) &&
+    (version === 5 || version === 6 || version === 7 || version === 8 || version === PROFILE.VERSION) &&
     view.getUint16(6, true) === PROFILE.SIZE;
 }
 
@@ -553,6 +648,53 @@ export function setLightingActivePreset(profile, presetIndex) {
   new DataView(profile.buffer, profile.byteOffset, profile.byteLength).setUint32(8, 0, true);
 }
 
+function clampAssistMs(value, fallback = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(0, Math.min(50, Math.round(number)));
+}
+
+function clampDurationMs(value, fallback = 12) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(1, Math.min(50, Math.round(number)));
+}
+
+function rangeMinFromLegacy(maxValue, randomized) {
+  const max = clampAssistMs(maxValue, 0);
+  return randomized && max > 1 ? 1 : max;
+}
+
+function packPowerAssist(power) {
+  const socdDelay = clampAssistMs(power.socdDelayMs, 10);
+  const reverseDelayMin = clampAssistMs(power.reverseTapDelayMinMs, 0);
+  const reverseDelayMax = clampAssistMs(power.reverseTapDelayMaxMs, reverseDelayMin);
+  const reverseDurationMin = clampDurationMs(power.reverseTapDurationMinMs, 12);
+  const reverseDurationMax = clampDurationMs(power.reverseTapDurationMaxMs, reverseDurationMin);
+  let word = 0;
+  if (power.socdEnabled) word |= POWER_FLAGS.SOCD_ENABLED;
+  if (power.reverseTapEnabled) word |= POWER_FLAGS.REVERSE_TAP_ENABLED;
+  word |= (socdDelay & POWER_BITS.RANGE_MASK) << POWER_BITS.SOCD_DELAY_SHIFT;
+  word |= (Math.min(reverseDelayMin, reverseDelayMax) & POWER_BITS.RANGE_MASK) << POWER_BITS.REVERSE_DELAY_MIN_SHIFT;
+  word |= (Math.max(reverseDelayMin, reverseDelayMax) & POWER_BITS.RANGE_MASK) << POWER_BITS.REVERSE_DELAY_MAX_SHIFT;
+  word |= (Math.min(reverseDurationMin, reverseDurationMax) & POWER_BITS.RANGE_MASK) << POWER_BITS.REVERSE_DURATION_MIN_SHIFT;
+  word |= (Math.max(reverseDurationMin, reverseDurationMax) & POWER_BITS.RANGE_MASK) << POWER_BITS.REVERSE_DURATION_MAX_SHIFT;
+  return word >>> 0;
+}
+
+function unpackPowerAssist(word) {
+  const field = (shift) => (word >>> shift) & POWER_BITS.RANGE_MASK;
+  return {
+    socdEnabled: (word & POWER_FLAGS.SOCD_ENABLED) !== 0,
+    socdDelayMs: clampAssistMs(field(POWER_BITS.SOCD_DELAY_SHIFT), 10),
+    reverseTapEnabled: (word & POWER_FLAGS.REVERSE_TAP_ENABLED) !== 0,
+    reverseTapDelayMinMs: clampAssistMs(field(POWER_BITS.REVERSE_DELAY_MIN_SHIFT), 0),
+    reverseTapDelayMaxMs: clampAssistMs(field(POWER_BITS.REVERSE_DELAY_MAX_SHIFT), 0),
+    reverseTapDurationMinMs: clampDurationMs(field(POWER_BITS.REVERSE_DURATION_MIN_SHIFT), 12),
+    reverseTapDurationMaxMs: clampDurationMs(field(POWER_BITS.REVERSE_DURATION_MAX_SHIFT), 12),
+  };
+}
+
 export function getPowerSettings(profile) {
   const off = PROFILE.POWER_OFFSET;
   const view = new DataView(profile.buffer, profile.byteOffset, profile.byteLength);
@@ -570,15 +712,39 @@ export function getPowerSettings(profile) {
       idleEnterDeepSleepMs: view.getUint32(off + 8, true),
       socdEnabled: profile[off + 12] !== 0,
       socdDelayMs: Math.max(0, Math.min(50, socdDelayMs)),
-      socdRandomize: profile[off + 14] !== 0,
       reverseTapEnabled: false,
-      reverseTapDelayMs: 0,
-      reverseTapDurationMs: 12,
-      reverseTapRandomize: false,
+      reverseTapDelayMinMs: 0,
+      reverseTapDelayMaxMs: 0,
+      reverseTapDurationMinMs: 12,
+      reverseTapDurationMaxMs: 12,
     };
   }
 
-  const flags = profile[off + 12];
+  if (version === 8) {
+    const flags = profile[off + 12];
+    const reverseDelay = clampAssistMs(profile[off + 15] || 0, 0);
+    const reverseDuration = clampDurationMs(profile[off + 14] || 12, 12);
+    const reverseRandom = (flags & 0x08) !== 0;
+    return {
+      defaultMode: profile[off + 0],
+      allowModeCycle: profile[off + 1] !== 0,
+      scanGameMs: profile[off + 2],
+      scanOfficeMs: profile[off + 3],
+      scanSaverMs: profile[off + 4],
+      idleScanMs: profile[off + 5],
+      idleEnterLowPowerMs: view.getUint16(off + 6, true),
+      idleEnterDeepSleepMs: view.getUint32(off + 8, true),
+      socdEnabled: (flags & 0x01) !== 0,
+      socdDelayMs: clampAssistMs(profile[off + 13] || 10, 10),
+      reverseTapEnabled: (flags & 0x04) !== 0,
+      reverseTapDelayMinMs: rangeMinFromLegacy(reverseDelay, reverseRandom),
+      reverseTapDelayMaxMs: reverseDelay,
+      reverseTapDurationMinMs: rangeMinFromLegacy(reverseDuration, reverseRandom),
+      reverseTapDurationMaxMs: reverseDuration,
+    };
+  }
+
+  const assist = unpackPowerAssist(view.getUint32(off + 12, true));
   return {
     defaultMode: profile[off + 0],
     allowModeCycle: profile[off + 1] !== 0,
@@ -588,24 +754,14 @@ export function getPowerSettings(profile) {
     idleScanMs: profile[off + 5],
     idleEnterLowPowerMs: view.getUint16(off + 6, true),
     idleEnterDeepSleepMs: view.getUint32(off + 8, true),
-    socdEnabled: (flags & 0x01) !== 0,
-    socdDelayMs: Math.max(0, Math.min(50, profile[off + 13] || 10)),
-    socdRandomize: (flags & 0x02) !== 0,
-    reverseTapEnabled: (flags & 0x04) !== 0,
-    reverseTapDelayMs: Math.max(0, Math.min(50, profile[off + 15] || 0)),
-    reverseTapDurationMs: Math.max(0, Math.min(50, profile[off + 14] || 12)),
-    reverseTapRandomize: (flags & 0x08) !== 0,
+    ...assist,
   };
 }
 
 export function setPowerSettings(profile, power) {
   const off = PROFILE.POWER_OFFSET;
   const view = new DataView(profile.buffer, profile.byteOffset, profile.byteLength);
-  let flags = 0;
-  if (power.socdEnabled) flags |= 0x01;
-  if (power.socdRandomize) flags |= 0x02;
-  if (power.reverseTapEnabled) flags |= 0x04;
-  if (power.reverseTapRandomize) flags |= 0x08;
+  view.setUint16(4, PROFILE.VERSION, true);
   profile[off + 0] = Number(power.defaultMode || 0);
   profile[off + 1] = power.allowModeCycle ? 1 : 0;
   profile[off + 2] = Number(power.scanGameMs || 1);
@@ -614,10 +770,7 @@ export function setPowerSettings(profile, power) {
   profile[off + 5] = Number(power.idleScanMs || 100);
   view.setUint16(off + 6, Number(power.idleEnterLowPowerMs || 0), true);
   view.setUint32(off + 8, Number(power.idleEnterDeepSleepMs || 0), true);
-  profile[off + 12] = flags;
-  profile[off + 13] = Math.max(0, Math.min(50, Number(power.socdDelayMs ?? 10)));
-  profile[off + 14] = Math.max(0, Math.min(50, Number(power.reverseTapDurationMs ?? 12)));
-  profile[off + 15] = Math.max(0, Math.min(50, Number(power.reverseTapDelayMs ?? 0)));
+  view.setUint32(off + 12, packPowerAssist(power), true);
   view.setUint32(8, 0, true);
 }
 
@@ -667,6 +820,8 @@ export function decodeRuntimeState(bytes) {
     lightingPaused: bytes[2] !== 0,
     activeScanIntervalMs: bytes[3],
     idleMs: view.getUint32(4, true),
+    socdEnabled: bytes.length >= 10 ? bytes[8] !== 0 : null,
+    reverseTapEnabled: bytes.length >= 10 ? bytes[9] !== 0 : null,
   };
 }
 

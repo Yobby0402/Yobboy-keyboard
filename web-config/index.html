@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css?v=20260608a">
+  <link rel="stylesheet" href="./styles.css?v=20260609g">
 </head>
 <body>
   <header class="topbar">
@@ -33,11 +33,12 @@
         <option value="bluetooth">BLE</option>
       </select>
       <button class="secondary" id="btn-read" disabled><span class="material-symbols-outlined">download</span><span data-i18n="read">Read</span></button>
-      <button class="secondary" id="btn-save" disabled><span class="material-symbols-outlined">save</span><span data-i18n="save">Save</span></button>
+      <button class="secondary" id="btn-save" disabled><span class="material-symbols-outlined">save</span><span data-i18n="save">Apply to Keyboard</span></button>
       <button class="secondary" id="btn-reboot" disabled data-i18n="reboot">Reboot</button>
       <button class="danger" id="btn-connect" data-i18n="connect">Connect</button>
     </div>
   </header>
+  <div id="app-toast" class="app-toast hidden" role="status" aria-live="polite"></div>
 
   <div class="app-shell">
     <aside class="left-panel">
@@ -62,6 +63,18 @@
         <strong data-i18n="unsaved">UNSAVED CHANGES</strong>
       </section>
 
+      <section class="runtime-card">
+        <label data-i18n="runtimeState">RUNTIME STATE</label>
+        <div class="runtime-list">
+          <div><span data-i18n="runtimeMode">CURRENT MODE</span><strong id="runtime-mode">--</strong></div>
+          <div><span data-i18n="runtimeScan">SCAN INTERVAL</span><strong id="runtime-scan">--</strong></div>
+          <div><span data-i18n="runtimeSocd">SOCD</span><strong id="runtime-socd">--</strong></div>
+          <div><span data-i18n="runtimeReverseTap">REVERSE TAP</span><strong id="runtime-reverse-tap">--</strong></div>
+          <div><span data-i18n="runtimeIdle">IDLE TIME</span><strong id="runtime-idle">--</strong></div>
+          <div><span data-i18n="runtimeLighting">LIGHTING</span><strong id="runtime-lighting">--</strong></div>
+        </div>
+      </section>
+
       <section class="inspector">
         <div class="inspector-title">
           <div><span class="material-symbols-outlined">dashboard_customize</span><strong data-i18n="layout">LAYOUT</strong></div>
@@ -77,15 +90,9 @@
           <strong id="layout-source">Local Default</strong>
           <small id="layout-note" data-i18n="layoutNote">Device profile does not include visual layout data.</small>
         </div>
-        <button class="secondary wide" id="btn-map-mode" data-i18n="mapMode">Key Number Map Mode</button>
-        <button class="outline wide" id="btn-led-map-mode" data-i18n="ledMapMode">LED Map Mode</button>
         <button class="outline wide" id="btn-default-layout" data-i18n="restoreDefaultLayout">Restore Default Layout</button>
       </section>
 
-      <section class="console-card">
-        <label data-i18n="console">DEBUG CONSOLE</label>
-        <div id="console-mini"></div>
-      </section>
     </aside>
 
     <main class="workspace">
@@ -95,10 +102,12 @@
             <span id="layout-name">LAYOUT: YOBBOY 80 KEY</span>
             <span class="dirty-dot hidden" id="unsaved-dot"></span>
           </div>
+          <div class="layer-switch" id="layer-switch"></div>
           <div class="view-controls">
             <label><input type="checkbox" id="toggle-input-test" checked> <span data-i18n="inputTest">Input Test</span></label>
             <label><input type="checkbox" id="toggle-device-scan"> <span data-i18n="deviceScan">Device Scan</span></label>
             <label><input type="checkbox" id="toggle-key-number" checked> <span data-i18n="keyNumberShort">Key #</span></label>
+            <label><input type="checkbox" id="toggle-led-index"> <span data-i18n="ledIndexShort">LED #</span></label>
             <label><input type="checkbox" id="toggle-binding" checked> <span data-i18n="binding">Binding</span></label>
           </div>
         </div>
@@ -111,15 +120,37 @@
           <span class="material-symbols-outlined">keyboard_command_key</span>
           <output id="input-test-status" data-i18n="inputTestIdle">Press keys while this page is focused.</output>
         </div>
-        <div class="layer-switch" id="layer-switch"></div>
 
-        <section class="change-card">
-          <div class="inspector-title compact">
-            <div><span class="material-symbols-outlined accent-blue">history</span><strong data-i18n="changeList">CHANGE LIST</strong></div>
+        <div class="workspace-bottom-panel">
+          <nav class="bottom-panel-tabs" role="tablist" aria-label="Information Panel">
+            <button type="button" class="bottom-panel-tab active" data-bottom-tab="console" data-i18n="console">Debug Info</button>
+            <button type="button" class="bottom-panel-tab" data-bottom-tab="changes" data-i18n="changeList">CHANGE LIST</button>
+            <button type="button" class="bottom-panel-tab" data-bottom-tab="keyHistory" data-i18n="keyHistory">Key History</button>
+          </nav>
+
+          <div class="bottom-panel-content">
+            <section class="console-card bottom-panel-card" data-bottom-panel="console">
+              <label data-i18n="console">Debug Info</label>
+              <div id="console-mini"></div>
+            </section>
+
+            <section class="change-card bottom-panel-card" data-bottom-panel="changes" hidden>
+              <div class="inspector-title compact">
+                <div><span class="material-symbols-outlined accent-blue">history</span><strong data-i18n="changeList">CHANGE LIST</strong></div>
+              </div>
+              <div id="change-list-empty" class="change-list-empty" data-i18n="changeListEmpty">No unsaved changes.</div>
+              <div id="change-list" class="change-list"></div>
+            </section>
+
+            <section class="key-history-card bottom-panel-card" data-bottom-panel="keyHistory" hidden>
+              <div class="inspector-title compact">
+                <div><span class="material-symbols-outlined accent-green">timeline</span><strong data-i18n="keyHistory">Key History</strong></div>
+              </div>
+              <div id="key-history-empty" class="key-history-empty" data-i18n="keyHistoryEmpty">No key history yet.</div>
+              <div id="key-history-list" class="key-history-list"></div>
+            </section>
           </div>
-          <div id="change-list-empty" class="change-list-empty" data-i18n="changeListEmpty">No unsaved changes.</div>
-          <div id="change-list" class="change-list"></div>
-        </section>
+        </div>
       </section>
     </main>
 
@@ -155,6 +186,9 @@
           <option value="7" data-i18n="actionLedDown">LED Brightness Down</option>
           <option value="8" data-i18n="actionLedNext">LED Effect Next</option>
           <option value="9" data-i18n="actionPowerModeNext">Power Mode Next</option>
+          <option value="10" data-i18n="actionSocdToggle">SOCD Toggle</option>
+          <option value="11" data-i18n="actionReverseTapToggle">Reverse Tap Toggle</option>
+          <option value="12" data-i18n="actionWasdAssistToggle">WASD Assist Toggle</option>
         </select>
 
         <div id="keyboard-editor" class="editor-block">
@@ -180,7 +214,6 @@
         <input id="led-index-input" type="number" min="0" max="70" placeholder="Unmapped">
 
         <div class="button-grid">
-          <button class="outline" id="btn-preview-led-index" type="button" data-i18n="previewLed">Preview LED</button>
           <button class="outline danger-text" id="btn-clear-key" data-i18n="clearKey">Clear Key</button>
           <button class="outline" id="btn-restore-key" data-i18n="restore">Restore</button>
           <button class="primary wide" id="btn-apply-binding" data-i18n="applyBinding">Apply Binding</button>
@@ -310,7 +343,7 @@
             <label data-i18n="socd">SOCD</label>
             <button class="info-button" type="button" data-help-key="infoSocd" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
           </div>
-          <label class="checkbox-row"><input type="checkbox" id="socd-enabled"> <span data-i18n="socdEnable">Enable SOCD (WASD)</span></label>
+          <input type="checkbox" id="socd-enabled" hidden>
           <div class="numeric-grid compact">
             <div>
               <div class="field-heading">
@@ -320,7 +353,6 @@
               <input id="socd-delay-ms" type="number" min="0" max="50" step="1" value="10">
             </div>
           </div>
-          <label class="checkbox-row"><input type="checkbox" id="socd-randomize"> <span data-i18n="socdRandom">Randomize 1..N ms</span></label>
         </div>
 
         <div class="power-subsection">
@@ -328,24 +360,37 @@
             <label data-i18n="reverseTap">REVERSE TAP ASSIST</label>
             <button class="info-button" type="button" data-help-key="infoReverseTap" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
           </div>
-          <label class="checkbox-row"><input type="checkbox" id="reverse-tap-enabled"> <span data-i18n="reverseTapEnable">Enable Reverse Tap (WASD)</span></label>
+          <input type="checkbox" id="reverse-tap-enabled" hidden>
           <div class="numeric-grid">
             <div>
               <div class="field-heading">
-                <label data-i18n="reverseTapDelay">TAP DELAY (MS)</label>
+                <label data-i18n="reverseTapDelayMin">DELAY MIN (MS)</label>
                 <button class="info-button" type="button" data-help-key="infoReverseTapDelay" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
               </div>
-              <input id="reverse-tap-delay-ms" type="number" min="0" max="50" step="1" value="0">
+              <input id="reverse-tap-delay-min-ms" type="number" min="0" max="50" step="1" value="0">
             </div>
             <div>
               <div class="field-heading">
-                <label data-i18n="reverseTapDuration">TAP DURATION (MS)</label>
+                <label data-i18n="reverseTapDelayMax">DELAY MAX (MS)</label>
+                <button class="info-button" type="button" data-help-key="infoReverseTapDelay" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+              </div>
+              <input id="reverse-tap-delay-max-ms" type="number" min="0" max="50" step="1" value="0">
+            </div>
+            <div>
+              <div class="field-heading">
+                <label data-i18n="reverseTapDurationMin">DURATION MIN (MS)</label>
                 <button class="info-button" type="button" data-help-key="infoReverseTapDuration" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
               </div>
-              <input id="reverse-tap-duration-ms" type="number" min="0" max="50" step="1" value="12">
+              <input id="reverse-tap-duration-min-ms" type="number" min="1" max="50" step="1" value="12">
+            </div>
+            <div>
+              <div class="field-heading">
+                <label data-i18n="reverseTapDurationMax">DURATION MAX (MS)</label>
+                <button class="info-button" type="button" data-help-key="infoReverseTapDuration" aria-label="Info"><span class="material-symbols-outlined">info</span></button>
+              </div>
+              <input id="reverse-tap-duration-max-ms" type="number" min="1" max="50" step="1" value="12">
             </div>
           </div>
-          <label class="checkbox-row"><input type="checkbox" id="reverse-tap-randomize"> <span data-i18n="reverseTapRandom">Randomize 1..N ms</span></label>
         </div>
 
         <div class="numeric-grid">
@@ -375,15 +420,6 @@
           </div>
         </div>
 
-        <div class="runtime-card">
-          <label data-i18n="runtimeState">RUNTIME STATE</label>
-          <div class="runtime-list">
-            <div><span data-i18n="runtimeMode">CURRENT MODE</span><strong id="runtime-mode">--</strong></div>
-            <div><span data-i18n="runtimeScan">SCAN INTERVAL</span><strong id="runtime-scan">--</strong></div>
-            <div><span data-i18n="runtimeIdle">IDLE TIME</span><strong id="runtime-idle">--</strong></div>
-            <div><span data-i18n="runtimeLighting">LIGHTING</span><strong id="runtime-lighting">--</strong></div>
-          </div>
-        </div>
         </section>
       </section>
 
@@ -446,6 +482,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260608b"></script>
+  <script type="module" src="./app.js?v=20260609i"></script>
 </body>
 </html>
