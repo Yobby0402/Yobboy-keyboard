@@ -1276,7 +1276,12 @@ function clampCycleInterval(value) {
 function updateKeyboardScale() {
   const bounds = layoutBounds(state.layout);
   const availableWidth = Math.max(320, (els.keyboardScroll?.clientWidth || bounds.width) - 4);
-  const scale = bounds.width > 0 ? Math.min(1.85, Math.max(0.72, availableWidth / bounds.width)) : 1;
+  const availableHeight = Math.max(120, (els.keyboardScroll?.clientHeight || bounds.height) - 6);
+  const widthScale = bounds.width > 0 ? availableWidth / bounds.width : 1;
+  const heightScale = bounds.height > 0 ? availableHeight / bounds.height : 1;
+  const scale = bounds.width > 0 && bounds.height > 0
+    ? Math.min(1.85, Math.max(0.55, Math.min(widthScale, heightScale)))
+    : 1;
   const visualWidth = bounds.width * scale;
   const offsetX = Math.max((availableWidth - visualWidth) / 2, 0);
   els.keyboardFit.style.height = `${Math.ceil(bounds.height * scale)}px`;

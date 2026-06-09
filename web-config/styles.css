@@ -440,10 +440,10 @@ dd {
 }
 
 .keyboard-scroll {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   overflow: auto;
-  min-height: 190px;
-  max-height: min(52vh, 420px);
+  min-height: 0;
+  max-height: none;
   padding: 4px 0 2px;
 }
 
@@ -679,8 +679,8 @@ dd {
 }
 
 .workspace-bottom-panel {
-  flex: 1 1 auto;
-  min-height: 140px;
+  flex: 0 0 20%;
+  min-height: 96px;
   display: grid;
   grid-template-columns: minmax(96px, 15%) minmax(0, 1fr);
   column-gap: clamp(8px, 5%, 24px);
@@ -1703,7 +1703,7 @@ dialog::backdrop {
   display: none !important;
 }
 
-@media (max-width: 1120px) {
+@media (max-width: 900px) {
   body {
     overflow: auto;
   }
@@ -1739,7 +1739,7 @@ dialog::backdrop {
   .workspace-bottom-panel {
     grid-template-columns: 1fr;
     row-gap: 12px;
-    min-height: 320px;
+    min-height: 150px;
   }
 
   .bottom-panel-tabs {
