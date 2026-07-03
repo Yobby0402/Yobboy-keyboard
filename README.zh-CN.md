@@ -1,150 +1,157 @@
 # Yobboy Keyboard
 
 [![Platform](https://img.shields.io/badge/Platform-ESP32--S3-111111?style=flat-square)](https://www.espressif.com/en/products/socs/esp32-s3)
-[![USB](https://img.shields.io/badge/USB-HID%20%2B%20CDC-1f6feb?style=flat-square)](#项目能力)
-[![Lighting](https://img.shields.io/badge/Lighting-Lamp%20Array%20%2B%20Presets-7c3aed?style=flat-square)](#项目能力)
-[![Configurator](https://img.shields.io/badge/Configurator-WebSerial-2da44e?style=flat-square)](#网页配置器)
+[![Firmware](https://img.shields.io/badge/Firmware-USB%20%2F%20BLE%20HID-1f6feb?style=flat-square)](#当前产品能力)
+[![Configurator](https://img.shields.io/badge/Configurator-WebSerial%20%2F%20BLE-2da44e?style=flat-square)](#网页配置器)
+[![Roadmap](https://img.shields.io/badge/Roadmap-Custom%20Keyboard%20Suite-7c3aed?style=flat-square)](#roadmap)
 
 [English](./README.md)
 
-**Yobboy Keyboard** 是一个基于 **ESP32-S3** 的开源自定义键盘项目。  
-这个仓库不只是固件本身，也同时包含 USB 配置通道、浏览器配置器、配置协议，以及与这把键盘直接相关的布局和工程文件。
+Yobboy Keyboard 是一个面向客制化键盘的开源产品项目。
 
-它的核心思路不是把“固件”和“上位工具”拆成两个彼此独立的项目，而是把矩阵扫描、HID 行为、灯光、持久化配置、布局元数据和网页配置器放在同一条链路里一起演进。
+它现在已经不只是一份键盘固件，而是在逐步搭建一套从配列设计、键帽建模、PCB 与外壳加工，到固件和网页配置器的完整解决方案。当前仓库主要承担“软件 + 固件”这一层：让一把自制键盘能够稳定输入、可视化配置、保存 profile，并支持灯效、功耗和游戏输入特性。
 
-## 项目简介
+更长期的目标，是让任意配列的键盘可以从 KLE 这类布局描述开始，一步步生成可制造、可配置、可迭代的成品键盘。
 
-这个项目围绕一套比较完整的键盘架构展开：
+## 项目定位
 
-- **ESP32-S3** 作为主控
-- **USB HID + CDC** 作为设备接口
-- **HC165** 作为按键扫描路径
-- **WS2812 灯光** 作为设备侧灯光系统
-- **NVS 持久化 profile** 作为配置存储
-- **WebSerial 网页配置器** 作为浏览器侧管理入口
+客制化键盘通常会被拆成很多分散环节：配列设计、键帽、PCB、外壳、固件、配置软件、调试工具。Yobboy 希望把这些环节连接起来，让“我想要一把这样的键盘”可以更自然地落到“这是可以加工和使用的键盘”。
 
-这意味着大多数日常调校工作，例如键位、灯光、功耗和输入行为，不需要重新编译固件就能完成。
+当前阶段的重点是：
 
-## 项目能力
+- 做好一套真实可用的键盘固件。
+- 提供浏览器里的可视化配置器。
+- 支持从 KLE 等布局来源导入并管理键盘布局。
+- 为后续“任意配列键盘定制”准备统一的数据模型和工作流。
 
-### 键盘固件
+## 当前产品能力
 
-- USB HID 键盘设备
-- USB CDC 配置 / 调试通道
-- 键位映射存储在设备 profile 中，而不是写死在固件里
-- Base 层和 Fn 层
-- 媒体 / Consumer 动作
-- 设备侧 profile 校验与版本迁移
+这个仓库目前包含 Yobboy Keyboard 的固件、配置协议和网页配置器。
 
-### 灯光系统
+- **可配置键盘固件**
+  基于 ESP32-S3，支持 USB HID、BLE HID、Fn 层、媒体控制、设备 profile、NVS 持久化配置。
 
-- **71 颗 WS2812 LED**
-- Windows Dynamic Lighting / Lamp Array
-- 多灯光预设存储在 profile 中
-- 支持常亮、呼吸、彩虹、波浪、分组静态、逐键静态、按键渐灭、涟漪等模式
-- 支持浏览器侧编辑和设备预览
+- **浏览器配置器**
+  `web-config/` 是一个静态网页应用，可通过 USB CDC / WebSerial 或 BLE 配置键盘。它用于读取、编辑、保存键位、灯效、功耗和设备元数据。
 
-### 功耗与输入行为
+- **灯效系统**
+  支持 WS2812 RGB 灯效、Windows Dynamic Lighting / Lamp Array、多个灯效预设，以及网页侧预览和调参。
 
-- 多档扫描 / 功耗参数
-- 可配置扫描间隔和空闲行为
-- **WASD SOCD**
-- **WASD 反向补键**
+- **输入体验调校**
+  支持可配置扫描参数、WASD SOCD、WASD 反向补键，适合需要精细输入时序的游戏场景。
 
-这些输入行为类能力对游戏场景尤其有价值，同时又保持为“可配置能力”，而不是固件里写死的一次性逻辑。
+- **配置导入导出**
+  支持 JSON 导入导出，也支持从 KLE 派生的可视化布局导入，便于备份、分享和继续迭代。
 
 ## 网页配置器
 
-`web-config/` 下的配置器是一个面向这把键盘的静态 WebSerial 应用。
+配置器位于 `web-config/`，它不是通用键盘网页模板，而是围绕 Yobboy profile、布局元数据、灯效和输入策略设计的产品界面。
 
-它当前支持：
+它当前可以完成：
 
-- 读取设备当前 profile
-- 编辑键位、Fn 层、灯光与功耗参数
-- 编辑键盘名称和可视布局元数据
-- 导入 KLE 派生布局
-- 向设备发送灯光预览
-- 将配置导出为 JSON
-- 从 JSON 导入配置
+- 连接键盘并读取当前 profile。
+- 编辑 Base / Fn 两层键位。
+- 调整灯效模式、颜色、亮度和预设。
+- 配置扫描、休眠、SOCD、反向补键等输入行为。
+- 编辑键盘名、USB 产品名、BLE 设备名和布局信息。
+- 导入 KLE 布局，导出 / 导入 JSON 配置。
 
-### 当前导入 / 导出覆盖范围
+本地体验：
 
-现有 JSON 导出 / 导入覆盖的是配置器管理的数据模型，也就是：
-
-- 完整的设备 `profile`
-- 可视 `layout`
-- 键盘名称（通过布局 / 配置器状态保存）
-
-也就是说，下面这些内容目前都支持导出与导入：
-
-- 键位绑定
-- Fn 层配置
-- 灯光预设
-- 功耗参数
-- SOCD
-- 反向补键
-- 可视布局
-
-它**不**包含：
-
-- 固件二进制
-- 运行时瞬态状态
-- 串口日志
-
-换句话说，它已经基本可以视作“完整配置导入 / 导出”，但不是“整机镜像备份”。
-
-## 关键参数
-
-当前固件 / 配置器模型里最重要的一些参数是：
-
-- **Profile 版本：** `v8`
-- **Profile 最大按键数：** `80`
-- **逻辑层数：** `2`（`Base` + `Fn`）
-- **灯光预设槽位：** `6`
-- **LED 数量：** `71`
-- **USB 配置通道：** CDC ACM
-
-这些参数决定了配置协议的边界，也决定了网页配置器当前的数据结构。
-
-## 这种设计的好处
-
-这个项目的设计，对一把已经做完硬件的键盘来说有几个明显优点：
-
-- **日常调校不依赖重新编译固件**  
-  键位、灯光、功耗和输入行为都在 profile 里。
-
-- **固件与配置工具天然对齐**  
-  协议和网页不是外部附属项目，而是同一个系统的一部分。
-
-- **适合通过 GitHub Pages 分发**  
-  配置器是静态网页，部署和分享都很轻。
-
-- **适合加入硬件定制行为**  
-  像 SOCD、反向补键这类与这把键盘强相关的输入逻辑，可以自然地纳入 profile 系统。
-
-## 仓库结构
-
-```text
-main/                          固件主代码
-main/include/                  固件头文件
-main/lamp_array/               灯光与 Lamp Array 实现
-web-config/                    静态网页配置器
-tools/serve_configurator.py    本地配置器服务器
+```bash
+python tools/serve_configurator.py
 ```
 
-## 相关文档
+脚本会在本机启动配置器，默认从 `http://127.0.0.1:8765/` 开始寻找可用端口。WebSerial 在浏览器中通常需要 HTTPS 或 localhost 环境。
 
-- [English README](./README.md)
-- [键盘布局说明](./KEYBOARD_LAYOUT.md)
-- [DMA / NVS 说明](./DMA_NVS_CONFIG_GUIDE.md)
-- [WebSerial 配置协议](./WEB_SERIAL_CONFIG_PROTOCOL.md)
+## 相关项目
 
-## 部署
+Yobboy 的目标不是只维护一个单独仓库，而是逐步形成一套客制化键盘工具链。
 
-`web-config/` 下的网页配置器可以通过 GitHub Pages 发布，工作流位于：
+| 模块 | 状态 | 说明 |
+| --- | --- | --- |
+| 键盘固件与配置器 | 已在本仓库实现 | 负责键盘运行、配置、灯效、输入策略和设备 profile |
+| 键帽生成器 | 已有独立仓库 | [Yobby0402/Keycap-Generator](https://github.com/Yobby0402/Keycap-Generator)，用于从布局和参数生成键帽模型 |
+| 任意配列键盘定制 | 开发中 | 目标是从任意配列推导 PCB、Gerber、外壳 / CNC 等加工文件 |
 
-- [.github/workflows/deploy-pages.yml](./.github/workflows/deploy-pages.yml)
+## Roadmap
 
----
+完整工作流的目标是从一个键盘布局出发，逐步生成可以生产和使用的键盘。
 
-Yobboy Keyboard 不是单纯的一份键盘固件，而是一套围绕这把键盘展开的完整工程：设备固件、配置协议和浏览器工具属于同一个产品层面。
+```text
+KLE
+↓
+Layout
+↓
+Profile
+↓
+Placement Solver
+↓
+Routing Solver
+↓
+PCB Generator
+↓
+Gerber
+↓
+CNC / PCB Factory
+↓
+Shell
+↓
+Software
+↓
+Keyboard
+```
+
+各阶段的含义：
+
+- **KLE**：使用 Keyboard Layout Editor 这类工具描述键盘配列。
+- **Layout**：把外部配列转换为项目内部布局模型，包括按键位置、尺寸、旋转和编号。
+- **Profile**：生成固件和配置器可理解的键位、灯光、设备名和布局元数据。
+- **Placement Solver**：根据布局推导开关、卫星轴、控制器、接口、固定点等关键部件的放置。
+- **Routing Solver**：自动规划矩阵、电源、数据线和约束关系。
+- **PCB Generator**：生成 PCB 设计文件。
+- **Gerber**：输出可交付 PCB 工厂的制造文件。
+- **CNC / PCB Factory**：进入 PCB 打样、CNC 或其他加工流程。
+- **Shell**：生成或适配键盘外壳、定位结构和装配空间。
+- **Software**：写入固件，使用配置器调校键位、灯效和输入体验。
+- **Keyboard**：完成一把从配列到软件都可控的客制化键盘。
+
+其中，“根据任意配列直接生成加工文件”的软件和算法仍在开发中。当前路线会先把布局、profile、键帽和固件配置链路打通，再继续推进 PCB、外壳和制造文件的自动生成。
+
+## 当前仓库结构
+
+```text
+main/                          ESP32-S3 键盘固件
+main/include/                  固件头文件
+main/lamp_array/               RGB 与 Lamp Array 支持
+web-config/                    浏览器配置器
+tools/serve_configurator.py    本地配置器启动脚本
+keyboard_layout_raw.json       KLE 原始布局数据
+WEB_SERIAL_CONFIG_PROTOCOL.md  配置协议说明
+KEYBOARD_LAYOUT.md             键盘布局说明
+```
+
+## 开发入口
+
+固件基于 ESP-IDF 构建：
+
+```bash
+idf.py build
+idf.py -p COM端口 flash monitor
+```
+
+配置器可以作为静态网页部署，仓库中已有 GitHub Pages 工作流：
+
+```text
+.github/workflows/deploy-pages.yml
+```
+
+## 项目状态
+
+Yobboy Keyboard 当前已经具备可用的固件与配置器基础。后续重点会放在三件事上：
+
+- 让配置器更像一个完整产品，而不是调试工具。
+- 将键帽生成器、布局导入和键盘 profile 更紧密地串起来。
+- 推进任意配列到 PCB / 外壳 / 加工文件的自动生成算法。
+
+最终目标很简单：让客制化键盘从“画一个想法”到“做出一把键盘”的距离更短。

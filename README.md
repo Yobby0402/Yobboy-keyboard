@@ -1,141 +1,157 @@
 # Yobboy Keyboard
 
 [![Platform](https://img.shields.io/badge/Platform-ESP32--S3-111111?style=flat-square)](https://www.espressif.com/en/products/socs/esp32-s3)
-[![USB](https://img.shields.io/badge/USB-HID%20%2B%20CDC-1f6feb?style=flat-square)](#capabilities)
-[![Lighting](https://img.shields.io/badge/Lighting-Lamp%20Array%20%2B%20Presets-7c3aed?style=flat-square)](#capabilities)
-[![Configurator](https://img.shields.io/badge/Configurator-WebSerial-2da44e?style=flat-square)](#browser-configurator)
+[![Firmware](https://img.shields.io/badge/Firmware-USB%20%2F%20BLE%20HID-1f6feb?style=flat-square)](#current-capabilities)
+[![Configurator](https://img.shields.io/badge/Configurator-WebSerial%20%2F%20BLE-2da44e?style=flat-square)](#browser-configurator)
+[![Roadmap](https://img.shields.io/badge/Roadmap-Custom%20Keyboard%20Suite-7c3aed?style=flat-square)](#roadmap)
 
-[Chinese / 中文](./README.zh-CN.md)
+[简体中文](./README.zh-CN.md)
 
-**Yobboy Keyboard** is an open-source custom keyboard project built around **ESP32-S3**.  
-It combines device firmware, a USB configuration channel, and a browser-based configurator in a single repository.
+Yobboy Keyboard is an open-source product project for custom mechanical keyboards.
 
-Rather than treating firmware and tooling as separate projects, this repo keeps the whole keyboard system together: matrix scanning, HID behavior, lighting, persistent profiles, layout metadata, and web configuration all evolve as one stack.
+It is no longer just a firmware repository. The project is growing into an end-to-end custom keyboard solution that connects layout design, keycap generation, PCB and enclosure manufacturing, firmware, and a browser-based configurator. This repository currently owns the software and firmware layer: stable input, visual configuration, persistent profiles, lighting, power behavior, and game-oriented input features.
 
-## Overview
+The long-term goal is to let any keyboard layout start from a KLE-style description and move step by step toward a manufacturable, configurable, and usable keyboard.
 
-The project is centered on a practical embedded keyboard architecture:
+## Product Vision
 
-- **ESP32-S3** as the controller
-- **USB HID + CDC** as the device interface
-- **HC165** as the key scanning path
-- **WS2812 lighting** with device-side preset support
-- **NVS-backed profiles** for persistent configuration
-- **WebSerial configurator** for browser-based editing and management
+Custom keyboards are usually split across many separate steps: layout design, keycaps, PCB, enclosure, firmware, configuration software, and debugging tools. Yobboy is intended to connect these steps so that "I want a keyboard shaped like this" can become "this is a keyboard that can be manufactured and used."
 
-This makes the keyboard configurable without recompiling firmware for day-to-day changes such as keymap, lighting, or power behavior.
+The current focus is:
 
-## Capabilities
+- Build a practical keyboard firmware stack.
+- Provide a visual browser configurator.
+- Support layout import and management from sources such as KLE.
+- Prepare a shared data model and workflow for arbitrary-layout keyboard customization.
 
-### Keyboard firmware
+## Current Capabilities
 
-- USB HID keyboard device
-- USB CDC configuration / debug channel
-- Keymap stored on device instead of being fixed at compile time
-- Base layer and Fn layer support
-- Consumer/media actions
-- Device-side profile validation and version migration
+This repository contains the Yobboy Keyboard firmware, configuration protocol, and browser configurator.
 
-### Lighting system
+- **Configurable keyboard firmware**
+  Built around ESP32-S3, with USB HID, BLE HID, Fn layer support, media controls, device profiles, and NVS-backed persistent configuration.
 
-- **71 WS2812 LEDs**
-- Windows Dynamic Lighting / Lamp Array support
-- Multiple lighting presets stored in profile
-- Solid, breath, rainbow, wave, static-group, per-key static, key-fade, and ripple style modes
-- Browser-side editing with live device preview
+- **Browser configurator**
+  `web-config/` is a static web app that configures the keyboard through USB CDC / WebSerial or BLE. It can read, edit, and save keymaps, lighting, power settings, and device metadata.
 
-### Power and input behavior
+- **Lighting system**
+  Supports WS2812 RGB lighting, Windows Dynamic Lighting / Lamp Array, multiple lighting presets, and browser-side preview and tuning.
 
-- Multiple scan/power profiles
-- Configurable scan intervals and idle behavior
-- **SOCD for WASD**
-- **Reverse Tap Assist for WASD**
+- **Input behavior tuning**
+  Supports configurable scan parameters, WASD SOCD, and WASD Reverse Tap Assist for games that care about movement timing and input resolution.
 
-These input-side features are useful when the keyboard is used for games that care about timing and movement resolution, while still keeping the behavior configurable rather than hard-coded.
+- **Configuration import and export**
+  Supports JSON import/export and KLE-derived visual layout import, making configurations easier to back up, share, and iterate.
 
-## Browser configurator
+## Browser Configurator
 
-The configurator in `web-config/` is a static WebSerial app designed specifically for this keyboard.
+The configurator lives in `web-config/`. It is not a generic keyboard web template; it is designed around the Yobboy profile model, layout metadata, lighting system, and input behavior controls.
 
 It currently supports:
 
-- Reading the current device profile
-- Editing keymap, Fn layer, lighting, and power parameters
-- Editing keyboard name and visual layout metadata
-- Importing KLE-derived layouts
-- Previewing lighting on the device
-- Exporting and importing configuration as JSON
+- Connecting to the keyboard and reading the active profile.
+- Editing Base and Fn layer keymaps.
+- Adjusting lighting modes, colors, brightness, and presets.
+- Configuring scan behavior, sleep behavior, SOCD, and Reverse Tap Assist.
+- Editing keyboard name, USB product name, BLE device name, and layout metadata.
+- Importing KLE layouts and importing/exporting JSON configuration.
 
-### What export / import covers
+Run it locally with:
 
-The current JSON export/import flow includes the configurator-managed data model:
-
-- full device `profile`
-- visual `layout`
-- keyboard name (through layout/configurator state)
-
-That means key bindings, lighting presets, power settings, SOCD, Reverse Tap Assist, and the visual layout can all be exported and imported.
-
-It does **not** represent:
-
-- firmware binaries
-- transient runtime state
-- serial logs
-
-In other words: it is effectively a full **configuration export/import**, not a full device image backup.
-
-## Key project parameters
-
-These are the main current limits and characteristics exposed by the firmware/configurator model:
-
-- **Profile version:** `v8`
-- **Maximum keys in profile:** `80`
-- **Logical layers:** `2` (`Base` + `Fn`)
-- **Lighting preset slots:** `6`
-- **Lighting LED count:** `71`
-- **USB configuration interface:** CDC ACM
-
-Those values matter because they define the shape of the configuration protocol and the browser configurator.
-
-## Why this design is useful
-
-This project is set up to make a custom keyboard easier to iterate on after hardware is already built:
-
-- **No firmware rebuild for routine tuning**  
-  Keymap, lighting, and power behavior live in device profile data.
-
-- **One repository for both firmware and configuration UX**  
-  The protocol and the web tool stay aligned with the firmware.
-
-- **Good fit for deployment through GitHub Pages**  
-  The configurator is static and browser-based, which makes distribution simple.
-
-- **Room for hardware-specific behavior**  
-  Features like SOCD and Reverse Tap Assist are integrated as part of the keyboard profile rather than bolted on externally.
-
-## Repository structure
-
-```text
-main/                          Firmware source
-main/include/                  Firmware headers
-main/lamp_array/               Lighting and Lamp Array implementation
-web-config/                    Static browser configurator
-tools/serve_configurator.py    Local configurator server
+```bash
+python tools/serve_configurator.py
 ```
 
-## Related files
+The script starts a local configurator server, beginning at `http://127.0.0.1:8765/` and moving to the next free port if needed. WebSerial usually requires HTTPS or a localhost environment in the browser.
 
-- [Chinese README](./README.zh-CN.md)
-- [Keyboard layout notes](./KEYBOARD_LAYOUT.md)
-- [DMA / NVS notes](./DMA_NVS_CONFIG_GUIDE.md)
-- [WebSerial protocol](./WEB_SERIAL_CONFIG_PROTOCOL.md)
+## Related Projects
 
-## Deployment
+Yobboy is intended to become a custom keyboard toolchain, not just a single repository.
 
-The browser configurator under `web-config/` can be published with GitHub Pages through:
+| Module | Status | Description |
+| --- | --- | --- |
+| Keyboard firmware and configurator | Implemented in this repository | Runs the keyboard and manages configuration, lighting, input behavior, and device profiles |
+| Keycap generator | Separate repository exists | [Yobby0402/Keycap-Generator](https://github.com/Yobby0402/Keycap-Generator), used to generate keycap models from layout and parameters |
+| Arbitrary-layout keyboard customization | In development | Intended to derive PCB, Gerber, enclosure, and CNC/manufacturing files from arbitrary keyboard layouts |
 
-- [.github/workflows/deploy-pages.yml](./.github/workflows/deploy-pages.yml)
+## Roadmap
 
----
+The intended workflow starts from a keyboard layout and gradually produces a keyboard that can be manufactured and used.
 
-Yobboy Keyboard is a compact but complete keyboard project: the firmware, configuration protocol, and browser tooling are part of the same product, not separate sidecars.
+```text
+KLE
+↓
+Layout
+↓
+Profile
+↓
+Placement Solver
+↓
+Routing Solver
+↓
+PCB Generator
+↓
+Gerber
+↓
+CNC / PCB Factory
+↓
+Shell
+↓
+Software
+↓
+Keyboard
+```
+
+Stage meanings:
+
+- **KLE**: Describe the keyboard layout with tools such as Keyboard Layout Editor.
+- **Layout**: Convert the external layout into the project's internal layout model, including key positions, sizes, rotation, and numbering.
+- **Profile**: Generate keymap, lighting, device name, and layout metadata that the firmware and configurator can understand.
+- **Placement Solver**: Derive switch, stabilizer, controller, connector, mounting point, and other component placement from the layout.
+- **Routing Solver**: Automatically plan matrix routing, power, data lines, and constraints.
+- **PCB Generator**: Generate PCB design files.
+- **Gerber**: Export manufacturing files for a PCB factory.
+- **CNC / PCB Factory**: Move into PCB prototyping, CNC, or other manufacturing processes.
+- **Shell**: Generate or adapt the keyboard enclosure, mounting structure, and assembly space.
+- **Software**: Flash firmware and use the configurator to tune keymaps, lighting, and input behavior.
+- **Keyboard**: Finish a custom keyboard whose layout, hardware, and software are all controlled by the same workflow.
+
+The software and algorithms for directly generating manufacturing files from arbitrary layouts are still in development. The current route is to first connect layout, profile, keycap generation, and firmware configuration, then continue toward automated PCB, enclosure, and manufacturing-file generation.
+
+## Repository Structure
+
+```text
+main/                          ESP32-S3 keyboard firmware
+main/include/                  Firmware headers
+main/lamp_array/               RGB and Lamp Array support
+web-config/                    Browser configurator
+tools/serve_configurator.py    Local configurator server script
+keyboard_layout_raw.json       Raw KLE layout data
+WEB_SERIAL_CONFIG_PROTOCOL.md  Configuration protocol notes
+KEYBOARD_LAYOUT.md             Keyboard layout notes
+```
+
+## Development
+
+The firmware is built with ESP-IDF:
+
+```bash
+idf.py build
+idf.py -p COM_PORT flash monitor
+```
+
+The configurator can be deployed as a static web app. This repository already includes a GitHub Pages workflow:
+
+```text
+.github/workflows/deploy-pages.yml
+```
+
+## Project Status
+
+Yobboy Keyboard already has a usable firmware and configurator foundation. The next work is focused on:
+
+- Making the configurator feel more like a complete product than a debug tool.
+- Connecting the keycap generator, layout import, and keyboard profile more tightly.
+- Advancing the arbitrary-layout-to-PCB/enclosure/manufacturing-file generation algorithms.
+
+The final goal is simple: shorten the distance between sketching a custom keyboard idea and building a working keyboard.
